@@ -1,15 +1,20 @@
 # main.py
+from dotenv import load_dotenv
+load_dotenv()
+
 import hmac
 import hashlib
 import json
 import logging
 import os
 from fastapi import FastAPI, Request, HTTPException
-from dotenv import load_dotenv
+
 from github_auth import get_installation_token
 from diff_extractor import extract_changed_chunks
+from doc_indexer import index_repo_docs
+from matcher import find_stale_sections
 
-load_dotenv()
+
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("driftwatch")
@@ -40,15 +45,24 @@ async def github_webhook(request: Request):
         pr = payload["pull_request"]
         owner = payload["repository"]["owner"]["login"]
         repo = payload["repository"]["name"]
-        logger.info(f"Merged PR #{pr['number']} in {payload['repository']['full_name']}: {pr['title']}")
+        repo_full = payload["repository"]["full_name"]
+        logger.info(f"Merged PR #{pr['number']} in {repo_full}: {pr['title']}")
 
         try:
             token = get_installation_token(GITHUB_APP_ID, GITHUB_PRIVATE_KEY_PATH, GITHUB_INSTALLATION_ID)
             chunks = extract_changed_chunks(owner, repo, pr["number"], token)
-            for c in chunks:
-                logger.info(f"Changed {c['type']} '{c['name']}' in {c['file']} (lines {c['start_line']}-{c['end_line']})")
+
+            for chunk in chunks:
+                logger.info(f"Changed {chunk['type']} '{chunk['name']}' in {chunk['file']} (lines {chunk['start_line']}-{chunk['end_line']})")
+                stale = find_stale_sections(repo_full, chunk)
+                if stale:
+                    for s in stale:
+                        logger.info(f"  -> Possible drift in '{s['heading']}' ({s['file_path']}) score={s['similarity']}")
+                else:
+                    logger.info(f"  -> No matching doc sections found above threshold")
+
         except Exception:
-            logger.exception(f"Failed to extract chunks for PR #{pr['number']}")
+            logger.exception(f"Failed processing PR #{pr['number']}")
     else:
         logger.info(f"Ignored event: {event} / action: {payload.get('action')}")
 
