@@ -4,7 +4,7 @@ from db import get_connection
 
 logger = logging.getLogger("driftwatch")
 
-SIMILARITY_THRESHOLD = 0.65
+SIMILARITY_THRESHOLD = 0.50
 TOP_K = 3
 
 

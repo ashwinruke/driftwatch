@@ -13,6 +13,8 @@ from github_auth import get_installation_token
 from diff_extractor import extract_changed_chunks
 from doc_indexer import index_repo_docs
 from matcher import find_stale_sections
+from drafter import draft_update
+from pr_commenter import post_pr_comment, format_drift_comment
 
 
 app = FastAPI()
@@ -54,12 +56,17 @@ async def github_webhook(request: Request):
 
             for chunk in chunks:
                 logger.info(f"Changed {chunk['type']} '{chunk['name']}' in {chunk['file']} (lines {chunk['start_line']}-{chunk['end_line']})")
-                stale = find_stale_sections(repo_full, chunk)
-                if stale:
-                    for s in stale:
-                        logger.info(f"  -> Possible drift in '{s['heading']}' ({s['file_path']}) score={s['similarity']}")
-                else:
-                    logger.info(f"  -> No matching doc sections found above threshold")
+                stale_sections = find_stale_sections(repo_full, chunk)
+
+                for section in stale_sections:
+                    logger.info(f"  -> Checking drift for '{section['heading']}' ({section['file_path']}) score={section['similarity']}")
+                    result = draft_update(chunk, section)
+                    logger.info(f"     Verdict: {result['verdict']} | {result['reason']}")
+
+                    if result["verdict"] == "OUTDATED":
+                        comment_body = format_drift_comment(chunk, section, result)
+                        post_pr_comment(owner, repo, pr["number"], token, comment_body)
+                        logger.info(f"     Posted PR comment for '{section['heading']}'")
 
         except Exception:
             logger.exception(f"Failed processing PR #{pr['number']}")
