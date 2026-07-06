@@ -3,6 +3,8 @@ import base64
 import re
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
+import logging
+logger = logging.getLogger("driftwatch")
 
 PY_LANGUAGE = Language(tspython.language())
 DEF_NODE_TYPES = {"function_definition", "class_definition"}
@@ -75,7 +77,8 @@ def extract_changed_chunks(owner: str, repo: str, pr_number: int, token: str):
 
         patch = f.get("patch")
         if not patch:
-            continue  # binary file, or too large for GitHub to include a patch
+            logger.info(f"Skipping {path}: no patch available (binary file or diff too large for GitHub to include)")
+            continue
 
         ranges = changed_line_ranges(patch)
         if not ranges:

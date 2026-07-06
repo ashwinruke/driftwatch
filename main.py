@@ -15,6 +15,7 @@ from doc_indexer import index_repo_docs
 from matcher import find_stale_sections
 from drafter import draft_update
 from pr_commenter import post_pr_comment, format_drift_comment
+from retry import with_retry
 
 
 app = FastAPI()
@@ -25,6 +26,7 @@ WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 GITHUB_APP_ID = os.environ["GITHUB_APP_ID"]
 GITHUB_PRIVATE_KEY_PATH = os.environ["GITHUB_PRIVATE_KEY_PATH"]
 GITHUB_INSTALLATION_ID = os.environ["GITHUB_INSTALLATION_ID"]
+MAX_COMMENTS_PER_PR = 3
 
 def verify_signature(payload_body: bytes, signature_header: str, secret: str) -> bool:
     if not signature_header:
@@ -54,19 +56,32 @@ async def github_webhook(request: Request):
             token = get_installation_token(GITHUB_APP_ID, GITHUB_PRIVATE_KEY_PATH, GITHUB_INSTALLATION_ID)
             chunks = extract_changed_chunks(owner, repo, pr["number"], token)
 
+            if not chunks:
+                logger.info(f"No relevant code changes found in PR #{pr['number']} (no .py files changed, or no function/class-level changes detected)")
+
+            comments_posted = 0
+
             for chunk in chunks:
+                if comments_posted >= MAX_COMMENTS_PER_PR:
+                    logger.info(f"Reached comment cap ({MAX_COMMENTS_PER_PR}) for PR #{pr['number']}, skipping remaining chunks")
+                    break
+
                 logger.info(f"Changed {chunk['type']} '{chunk['name']}' in {chunk['file']} (lines {chunk['start_line']}-{chunk['end_line']})")
                 stale_sections = find_stale_sections(repo_full, chunk)
 
                 for section in stale_sections:
+                    if comments_posted >= MAX_COMMENTS_PER_PR:
+                        break
+
                     logger.info(f"  -> Checking drift for '{section['heading']}' ({section['file_path']}) score={section['similarity']}")
-                    result = draft_update(chunk, section)
+                    result = with_retry(draft_update, chunk, section)
                     logger.info(f"     Verdict: {result['verdict']} | {result['reason']}")
 
                     if result["verdict"] == "OUTDATED":
                         comment_body = format_drift_comment(chunk, section, result)
-                        post_pr_comment(owner, repo, pr["number"], token, comment_body)
-                        logger.info(f"     Posted PR comment for '{section['heading']}'")
+                        with_retry(post_pr_comment, owner, repo, pr["number"], token, comment_body)
+                        comments_posted += 1
+                        logger.info(f"     Posted PR comment for '{section['heading']}' ({comments_posted}/{MAX_COMMENTS_PER_PR})")
 
         except Exception:
             logger.exception(f"Failed processing PR #{pr['number']}")

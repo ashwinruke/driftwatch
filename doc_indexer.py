@@ -7,15 +7,15 @@ logger = logging.getLogger("driftwatch")
 
 
 def split_markdown_into_sections(content: str) -> list[dict]:
-    """Split markdown into heading-level sections."""
-    sections = []
+    """Split markdown into heading-level sections, then further into paragraph-level chunks."""
+    raw_sections = []
     current_heading = None
     current_lines = []
 
     for line in content.splitlines():
         if line.startswith("#"):
             if current_lines:
-                sections.append({
+                raw_sections.append({
                     "heading": current_heading,
                     "content": "\n".join(current_lines).strip()
                 })
@@ -25,12 +25,63 @@ def split_markdown_into_sections(content: str) -> list[dict]:
             current_lines.append(line)
 
     if current_lines:
-        sections.append({
+        raw_sections.append({
             "heading": current_heading,
             "content": "\n".join(current_lines).strip()
         })
 
-    return [s for s in sections if len(s["content"]) > 50]
+    # Now split each raw section further into paragraph-level chunks,
+    # so a single heading with multiple unrelated paragraphs doesn't
+    # get embedded and matched as one oversized block.
+    final_sections = []
+    for section in raw_sections:
+        paragraphs = _split_into_paragraphs(section["content"])
+        for para in paragraphs:
+            if len(para.strip()) > 50:
+                final_sections.append({
+                    "heading": section["heading"],
+                    "content": para.strip(),
+                })
+
+    return final_sections
+
+
+def _split_into_paragraphs(content: str) -> list[str]:
+    """Split content into paragraphs, keeping fenced code blocks intact as single units."""
+    paragraphs = []
+    current = []
+    in_code_block = False
+
+    for line in content.splitlines():
+        if line.strip().startswith("```"):
+            if not in_code_block:
+                # Opening a code fence: if we already have accumulated
+                # text before it, that's its own paragraph.
+                if current:
+                    paragraphs.append("\n".join(current))
+                    current = []
+                current.append(line)
+                in_code_block = True
+            else:
+                # Closing a code fence: the code block itself is
+                # its own paragraph, flush it immediately.
+                current.append(line)
+                paragraphs.append("\n".join(current))
+                current = []
+                in_code_block = False
+            continue
+
+        if not in_code_block and line.strip() == "":
+            if current:
+                paragraphs.append("\n".join(current))
+                current = []
+        else:
+            current.append(line)
+
+    if current:
+        paragraphs.append("\n".join(current))
+
+    return paragraphs
 
 
 def fetch_markdown_files(owner: str, repo: str, token: str, path: str = "") -> list[dict]:
