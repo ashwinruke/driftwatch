@@ -11,11 +11,11 @@ from fastapi import FastAPI, Request, HTTPException
 
 from github_auth import get_installation_token
 from diff_extractor import extract_changed_chunks
-from doc_indexer import index_repo_docs
 from matcher import find_stale_sections
 from drafter import draft_update
 from pr_commenter import post_pr_comment, format_drift_comment
 from retry import with_retry
+from doc_indexer import index_repo_docs, index_specific_files
 
 
 app = FastAPI()
@@ -85,6 +85,45 @@ async def github_webhook(request: Request):
 
         except Exception:
             logger.exception(f"Failed processing PR #{pr['number']}")
+
+    elif event == "push":
+        ref = payload.get("ref", "")
+        repo_full = payload["repository"]["full_name"]
+        owner = payload["repository"]["owner"]["login"]
+        repo = payload["repository"]["name"]
+        default_branch = payload["repository"]["default_branch"]
+
+        if ref != f"refs/heads/{default_branch}":
+            logger.info(f"Ignored push to non-default branch: {ref}")
+            return {"status": "received"}
+
+        added_or_modified = set()
+        removed = set()
+
+        for commit in payload.get("commits", []):
+            for path in commit.get("added", []) + commit.get("modified", []):
+                if path.endswith(".md"):
+                    added_or_modified.add(path)
+            for path in commit.get("removed", []):
+                if path.endswith(".md"):
+                    removed.add(path)
+
+        # A file could appear in both lists across different commits in the same push;
+        # if it was ultimately removed, treat it as removed, not modified.
+        added_or_modified -= removed
+
+        if not added_or_modified and not removed:
+            logger.info(f"Push to {repo_full} touched no markdown files, skipping re-index")
+            return {"status": "received"}
+
+        logger.info(f"Push to {repo_full}: {len(added_or_modified)} doc file(s) changed, {len(removed)} removed")
+
+        try:
+            token = get_installation_token(GITHUB_APP_ID, GITHUB_PRIVATE_KEY_PATH, GITHUB_INSTALLATION_ID)
+            with_retry(index_specific_files, owner, repo, token, list(added_or_modified), list(removed))
+        except Exception:
+            logger.exception(f"Failed to re-index docs for {repo_full} after push")
+
     else:
         logger.info(f"Ignored event: {event} / action: {payload.get('action')}")
 
