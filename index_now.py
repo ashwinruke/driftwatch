@@ -10,8 +10,7 @@ from doc_indexer import index_repo_docs
 
 token = get_installation_token(
     os.environ["GITHUB_APP_ID"],
-    os.environ["GITHUB_PRIVATE_KEY_PATH"],
     os.environ["GITHUB_INSTALLATION_ID"],
 )
 
-index_repo_docs("ashwin-bot", "Multithreaded_Web_Server", token)
+index_repo_docs("ashwinruke", "Multithreaded_Web_Server", token)

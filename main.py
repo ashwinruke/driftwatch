@@ -24,7 +24,6 @@ logger = logging.getLogger("driftwatch")
 
 WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 GITHUB_APP_ID = os.environ["GITHUB_APP_ID"]
-GITHUB_PRIVATE_KEY_PATH = os.environ["GITHUB_PRIVATE_KEY_PATH"]
 GITHUB_INSTALLATION_ID = os.environ["GITHUB_INSTALLATION_ID"]
 MAX_COMMENTS_PER_PR = 3
 
@@ -53,7 +52,7 @@ async def github_webhook(request: Request):
         logger.info(f"Merged PR #{pr['number']} in {repo_full}: {pr['title']}")
 
         try:
-            token = get_installation_token(GITHUB_APP_ID, GITHUB_PRIVATE_KEY_PATH, GITHUB_INSTALLATION_ID)
+            token = get_installation_token(GITHUB_APP_ID, GITHUB_INSTALLATION_ID)
             chunks = extract_changed_chunks(owner, repo, pr["number"], token)
 
             if not chunks:
@@ -119,7 +118,7 @@ async def github_webhook(request: Request):
         logger.info(f"Push to {repo_full}: {len(added_or_modified)} doc file(s) changed, {len(removed)} removed")
 
         try:
-            token = get_installation_token(GITHUB_APP_ID, GITHUB_PRIVATE_KEY_PATH, GITHUB_INSTALLATION_ID)
+            token = get_installation_token(GITHUB_APP_ID, GITHUB_INSTALLATION_ID)
             with_retry(index_specific_files, owner, repo, token, list(added_or_modified), list(removed))
         except Exception:
             logger.exception(f"Failed to re-index docs for {repo_full} after push")

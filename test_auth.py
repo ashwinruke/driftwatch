@@ -14,7 +14,7 @@ token = get_installation_token(
 print("Got token:", token[:15] + "...")
 
 # Replace with your actual test repo and a real PR number from it
-owner = "ashwin-bot"
+owner = "ashwinruke"
 repo = "Multithreaded_Web_Server"
 pr_number = 2
 

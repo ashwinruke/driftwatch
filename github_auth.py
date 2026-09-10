@@ -1,12 +1,18 @@
 import time
 import jwt
 import httpx
+import os
 
 
-def get_installation_token(app_id: str, private_key_path: str, installation_id: str) -> str:
-    with open(private_key_path, "r") as f:
-        private_key = f.read()
+def load_private_key() -> str:
+    if "GITHUB_PRIVATE_KEY" in os.environ:
+        return os.environ["GITHUB_PRIVATE_KEY"].replace("\\n", "\n")
+    with open(os.environ["GITHUB_PRIVATE_KEY_PATH"], "r") as f:
+        return f.read()
 
+
+def get_installation_token(app_id: str, installation_id: str) -> str:
+    private_key = load_private_key()
     now = int(time.time())
     payload = {"iat": now - 60, "exp": now + 600, "iss": app_id}
     encoded_jwt = jwt.encode(payload, private_key, algorithm="RS256")
