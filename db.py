@@ -26,7 +26,7 @@ def setup_schema():
             file_path   TEXT NOT NULL,
             heading     TEXT,
             content     TEXT NOT NULL,
-            embedding   vector(3072
+            embedding   vector(768),
             indexed_at  TIMESTAMP DEFAULT NOW()
         );
     """)

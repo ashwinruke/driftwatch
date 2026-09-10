@@ -6,11 +6,14 @@ that reference it using embeddings, and posts a PR comment flagging
 outdated sections with an LLM-drafted suggested update.
 
 ## Status
-In development. Core detection pipeline works end-to-end:
-merged PR -> changed function/class extracted -> matched against indexed
-docs via semantic similarity -> logged as potential drift.
+Core pipeline complete and deployed. End-to-end flow working:
+merged PR -> changed function/class extracted (tree-sitter) -> matched
+against indexed docs via semantic similarity (pgvector) -> LLM verifies
+the match and drafts a fix -> suggestion posted as a PR comment.
 
-Next: LLM-drafted update suggestions, posted back as an actual PR comment.
+Docs also re-index automatically and incrementally whenever markdown
+files are pushed to the default branch, so the doc index stays current
+without manual intervention.
 
 ## How it works
 1. A PR is merged -> GitHub webhook fires (signature-verified)
@@ -18,8 +21,14 @@ Next: LLM-drafted update suggestions, posted back as an actual PR comment.
    functions/classes actually changed (not just raw diff lines)
 3. Each changed function is embedded and compared against a pre-indexed
    corpus of markdown doc sections using cosine similarity (pgvector)
-4. Sections above a similarity threshold are flagged as potentially outdated
-5. Coming next: an LLM drafts a suggested update, posted as a PR comment
+4. Sections above a similarity threshold are passed to an LLM, which
+   verifies whether the change actually makes the doc outdated (filtering
+   out topically-similar but behaviorally-unaffected sections)
+5. If genuinely outdated, the LLM drafts a corrected version of just that
+   section, and DriftWatch posts it as a PR comment (capped per PR to
+   avoid spamming large PRs)
+6. Separately, pushes to the default branch that touch markdown files
+   trigger an incremental re-index of just the changed files
 
 ## Architecture
 
@@ -30,18 +39,44 @@ PR merged -> webhook -> diff extraction (tree-sitter)
                 similarity search vs. doc index (pgvector)
                               |
                    flag stale sections (score >= threshold)
+                              |
+                    LLM verifies + drafts fix
+                              |
+                   posted as PR comment (capped per PR)
 
-Docs are indexed separately: markdown files are pulled from the repo,
-split into heading-level sections, embedded, and stored, independent
-of the webhook flow, so re-indexing docs doesn't require a code change.
+Push to default branch (markdown files changed)
+                              |
+              incremental re-index of just those files
+                              |
+                    doc index stays current
+
+Docs are indexed at the paragraph level (not just per heading), so a
+single doc section with multiple unrelated paragraphs doesn't get
+matched or drafted as one oversized block.
 
 ## Stack
 - FastAPI - webhook receiver + orchestration
 - GitHub App - authenticated API access (JWT -> installation token)
 - tree-sitter - AST-based code chunking (function/class level, not raw lines)
 - Google Gemini Embedding API - free-tier embeddings, no local compute needed
-- PostgreSQL + pgvector (via Docker) - vector storage and similarity search
-- ngrok - local webhook tunneling for development
+- Gemini 2.5 Flash - LLM verification + drafted update suggestions
+- PostgreSQL + pgvector - vector storage and similarity search
+- Render - hosted deployment (web service + managed Postgres)
+- Docker + ngrok - local development only
+
+## Deployment notes
+
+Deployed on Render's free tier for demonstration purposes:
+- The web service spins down after 15 minutes of inactivity; the first
+  request after idle time can take up to a minute to respond, which may
+  cause a GitHub webhook delivery to time out. GitHub retries failed
+  deliveries automatically, or you can manually redeliver from the
+  GitHub App's Recent Deliveries page.
+- The free PostgreSQL database expires 30 days after creation, with a
+  14-day grace period before deletion. Re-provisioning requires
+  re-running the indexing step against a fresh `DATABASE_URL`.
+- The private key is stored as a `GITHUB_PRIVATE_KEY` environment
+  variable in production, rather than a local file path.
 
 ## Local setup
 
@@ -68,7 +103,11 @@ Create a `.env` file:
     GEMINI_API_KEY=
     DATABASE_URL=postgresql://postgres:password@localhost:5432/driftwatch
 
-Index a repo's docs (one-time, or whenever docs change significantly):
+For local development, `GITHUB_PRIVATE_KEY_PATH` points to your `.pem`
+file. In production, `GITHUB_PRIVATE_KEY` (the full key contents) is
+used instead - both are supported.
+
+Index a repo's docs (one-time, or whenever you want a full rebuild):
 
     python index_now.py
 
@@ -84,11 +123,21 @@ Expose it for GitHub's webhook (dev only):
 
 | File | Purpose |
 |------|---------|
-| main.py | FastAPI app, webhook route, event filtering |
-| github_auth.py | GitHub App JWT + installation token exchange |
+| main.py | FastAPI app, webhook routes (PR merges + doc pushes), event filtering, comment cap |
+| github_auth.py | GitHub App JWT + installation token exchange (file or env-var key) |
 | diff_extractor.py | Fetches PR diffs, uses tree-sitter to find changed functions/classes |
 | db.py | PostgreSQL/pgvector connection + schema |
 | embeddings.py | Gemini embedding wrapper |
-| doc_indexer.py | Crawls markdown docs, splits into sections, embeds, stores |
+| doc_indexer.py | Crawls markdown docs, splits into paragraph-level sections, embeds, stores; supports full and incremental re-index |
 | matcher.py | Embeds changed code, runs similarity search against doc index |
-| index_now.py | One-off script to (re)build the doc index for a repo |
+| drafter.py | LLM verification + drafted update suggestion (Gemini 2.5 Flash) |
+| pr_commenter.py | Formats and posts the drift comment to the PR |
+| retry.py | Retry-with-backoff wrapper for transient API failures |
+| index_now.py | One-off script to build the initial doc index for a repo |
+
+## Roadmap (v2.0, not yet started)
+
+- Multi-repo support (config table of enrolled repos)
+- Drift history dashboard
+- Slack notifications alongside PR comments
+- JS/TS support via tree-sitter-javascript / tree-sitter-typescript
