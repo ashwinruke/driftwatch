@@ -10,6 +10,7 @@ from driftwatch.reporting.pr_summary import format_pr_summary
 from driftwatch.retry import with_retry
 from driftwatch.review import decision
 from driftwatch.review.context import extract_changed_chunks
+from driftwatch.static_analysis.runner import run_static_analysis
 
 logger = logging.getLogger("driftwatch")
 
@@ -31,6 +32,7 @@ def review_pull_request(payload: dict):
     try:
         token = get_installation_token(config.GITHUB_APP_ID, config.GITHUB_INSTALLATION_ID)
         chunks = extract_changed_chunks(owner, repo, pr_number, token, include_module_level=True)
+        run_static_analysis(chunks)  # attaches chunk["static_matches"] in place, once for the whole PR
 
         candidates: list[tuple] = []
         for chunk in chunks:
@@ -39,8 +41,16 @@ def review_pull_request(payload: dict):
 
         decided = decision.decide(candidates, repo_full, pr_number)
 
+        # Only "accepted" findings get posted (spec §19's publish rule).
+        # "needs_review"/"rejected" are logged for visibility but not
+        # persisted yet -- that's Phase 3's review_runs/findings schema.
+        accepted = [(finding, chunk) for finding, chunk in decided if finding.validation_status == "accepted"]
+        for finding, _ in decided:
+            if finding.validation_status != "accepted":
+                logger.info(f"Not posting '{finding.title}': {finding.validation_status} (score={finding.validation_score})")
+
         posted_findings = []
-        for finding, chunk in decided:
+        for finding, chunk in accepted:
             if len(posted_findings) >= config.MAX_COMMENTS_PER_PR:
                 logger.info(f"Reached comment cap ({config.MAX_COMMENTS_PER_PR}) for PR #{pr_number}, skipping remaining findings")
                 break
@@ -54,7 +64,8 @@ def review_pull_request(payload: dict):
             logger.info(f"Posted inline finding '{finding.title}' in {finding.file_path}:{chunk['anchor_line']} ({len(posted_findings)}/{config.MAX_COMMENTS_PER_PR})")
 
         candidate_findings = [candidate for candidate, _ in candidates]
-        summary = format_pr_summary(len(chunks), candidate_findings, posted_findings)
+        all_decided_findings = [finding for finding, _ in decided]
+        summary = format_pr_summary(len(chunks), candidate_findings, all_decided_findings, posted_findings)
         with_retry(post_pr_comment, owner, repo, pr_number, token, summary)
 
     except Exception:

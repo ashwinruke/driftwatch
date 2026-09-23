@@ -1,8 +1,9 @@
 import logging
 import uuid
 
-from driftwatch.app import config
 from driftwatch.review.models import CandidateFinding, Finding
+from driftwatch.validation.deduplication import deduplicate
+from driftwatch.validation.validator import validate
 
 logger = logging.getLogger("driftwatch")
 
@@ -12,17 +13,13 @@ def decide(
     repository: str,
     pull_request: int,
 ) -> list[tuple[Finding, dict]]:
-    """Phase 1: no validation layer yet, just a confidence floor. Every
-    finding that clears the bar is explicitly marked needs_review, not
-    accepted -- nothing has independently checked it. Phase 2 replaces this
-    function's internals with real evidence-based validation; the
-    (candidates, repository, pull_request) -> decided contract stays the
-    same, so the orchestrator won't need to change."""
+    """Phase 2: every candidate is run through the real validation pipeline
+    (driftwatch.validation) instead of Phase 1's bare confidence floor.
+    Same (candidates, repository, pull_request) -> decided contract as
+    before, so the orchestrator didn't need to change its call site."""
     decided = []
     for candidate, chunk in candidates:
-        if candidate.confidence < config.SECURITY_MIN_CONFIDENCE:
-            logger.info(f"Dropping low-confidence finding '{candidate.title}' (confidence={candidate.confidence})")
-            continue
+        result = validate(candidate, chunk)
 
         finding = Finding(
             id=str(uuid.uuid4()),
@@ -36,9 +33,13 @@ def decide(
             start_line=candidate.start_line,
             end_line=candidate.end_line,
             changed_code=chunk["text"],
+            evidence=result.evidence,
             llm_confidence=candidate.confidence,
-            validation_status="needs_review",
+            validation_score=result.score,
+            static_matches=list(chunk.get("static_matches", [])),
+            validation_status=result.status,
             suggested_fix=candidate.suggested_fix,
         )
         decided.append((finding, chunk))
-    return decided
+
+    return deduplicate(decided)

@@ -20,14 +20,16 @@ review engines behind a validation layer, plus eventually a dashboard), per
 `docs/roadmap.md` for the condensed phased plan, current-file→target-module
 mapping, and phase status.
 
-**Phase 0 (refactor) and Phase 1 (security review MVP) are done** — the
-flat-file layout is now the `driftwatch/` package described below, and a
+**Phases 0-2 are done** (refactor, security review MVP, validation layer)
+— the flat-file layout is now the `driftwatch/` package described below, a
 security review engine runs on `opened`/`synchronize`/`reopened` PR events
-alongside the untouched, merge-triggered doc-drift pipeline. Phase 1's
-security findings are **intentionally unvalidated** — every comment it
-posts says so explicitly — because the validation layer is Phase 2, not
-yet built. Don't jump ahead to later phases without checking
-`docs/roadmap.md` for current status first.
+alongside the untouched, merge-triggered doc-drift pipeline, and every
+posted finding is now evidence-grounded (syntactic location/diff checks +
+real offline Semgrep/Bandit corroboration + scoring) before it's allowed to
+post — see the security review pipeline below. Bug/quality engines,
+persistence, evaluation, and the dashboard don't exist yet. Don't jump
+ahead to later phases without checking `docs/roadmap.md` for current
+status first.
 
 Mandatory rules for any future work here (spec §42, applies to every
 phase): inspect before modifying and don't assume the repo matches the spec
@@ -86,10 +88,18 @@ Required env vars (`.env`, gitignored): `GITHUB_APP_ID`,
 `GITHUB_WEBHOOK_SECRET`, `GITHUB_INSTALLATION_ID`, `GEMINI_API_KEY`,
 `DATABASE_URL`, and either `GITHUB_PRIVATE_KEY_PATH` (local `.pem` file) or
 `GITHUB_PRIVATE_KEY` (full key contents, used in production). Optional:
-`MAX_COMMENTS_PER_PR` (default `3`), `SECURITY_MIN_CONFIDENCE` (default
-`0.6` — the Phase 1 security engine drops LLM findings below this
-confidence before posting). All of these except the private-key pair are
+`MAX_COMMENTS_PER_PR` (default `3`), `VALIDATION_ACCEPT_THRESHOLD` (default
+`0.75`) and `VALIDATION_REVIEW_THRESHOLD` (default `0.50`) — the score
+cutoffs the validation layer uses to decide accepted/needs_review/rejected
+(see Architecture below). All of these except the private-key pair are
 read once in `driftwatch/app/config.py`.
+
+Semgrep and Bandit (installed via `requirements.txt`) must be present as
+CLI executables for the security pipeline's static-analysis corroboration
+to work; both are invoked as subprocesses, resolved via
+`driftwatch/static_analysis/executables.py` relative to the running
+Python's own directory (not `PATH`) so they work whether or not the venv
+was "activated."
 
 ## Architecture
 
@@ -110,15 +120,28 @@ driftwatch/
 ├── ast/parser.py            # generic tree-sitter chunk extraction + line-range helpers
 ├── review/
 │   ├── context.py            # diff fetching + chunk-extraction glue (uses ast/ + github/)
-│   ├── models.py               # CandidateFinding / Finding / Evidence pydantic models
-│   ├── decision.py              # Phase-1 confidence-floor filter (Phase 2: real validation)
-│   └── orchestrator.py           # security-review pipeline: context -> engine -> decision -> reporting
+│   ├── models.py               # CandidateFinding / Finding / Evidence / StaticMatch models
+│   ├── decision.py              # runs each candidate through validation.validator.validate()
+│   └── orchestrator.py           # security-review pipeline: context -> static analysis ->
+│                                 # engine -> decision -> reporting
 ├── analyzers/
 │   ├── documentation/        # the doc-drift engine: indexer, matcher, drafter, formatting
 │   └── security.py            # the security engine: prompt + LLM call
 ├── llm/
 │   ├── embeddings.py          # Gemini embedding wrapper (doc-drift)
 │   └── provider.py             # LLMProvider protocol + GeminiProvider (structured JSON output)
+├── static_analysis/
+│   ├── rules/security.yml    # bundled, offline Semgrep ruleset (no --config auto)
+│   ├── semgrep.py             # subprocess adapter -> StaticMatch
+│   ├── bandit.py               # subprocess adapter -> StaticMatch
+│   ├── executables.py           # resolves the semgrep/bandit executables via sys.executable
+│   └── runner.py                 # runs both tools once per PR, remaps line numbers to chunks
+├── validation/
+│   ├── evidence.py            # location + diff-relevance + AST-context checks
+│   ├── rules.py                 # overstated-certainty wording heuristic
+│   ├── scoring.py                 # ValidationResult + compute_score() + decide_status()
+│   ├── deduplication.py             # collapses overlapping same-file/category findings
+│   └── validator.py                  # validate(candidate, chunk) -> ValidationResult
 ├── reporting/
 │   ├── comment_formatter.py    # inline-finding markdown (security/bug/quality findings)
 │   └── pr_summary.py            # PR-level summary markdown
@@ -182,9 +205,14 @@ review.context.extract_changed_chunks(..., include_module_level=True)
                                              a pseudo-chunk for changed lines not covered
                                              by any function/class (e.g. a hardcoded secret
                                              as a module-level assignment), an anchor_line
-                                             per chunk (first actually-changed line, required
-                                             by GitHub's line-comment API), imports + a few
-                                             lines of surrounding context
+                                             per chunk, diff_ranges (for the validator's
+                                             diff-relevance check), imports + a few lines of
+                                             surrounding context
+        |
+static_analysis.runner.run_static_analysis  -- writes every chunk to a temp dir, runs the
+                                             bundled offline Semgrep ruleset + Bandit ONCE for
+                                             the whole PR (not per chunk -- CLI startup alone
+                                             is ~1-3s each), attaches chunk["static_matches"]
         |
 analyzers.security.analyze                -- builds a security-focused prompt per chunk,
                                              calls the LLM provider, filters to category
@@ -195,25 +223,33 @@ llm.provider.GeminiProvider.generate_findings  -- Gemini structured JSON output
                                              parsed by the pure, independently-testable
                                              parse_findings_response()
         |
-review.decision.decide                    -- Phase 1 has no validation layer yet: this is
-                                             just a confidence floor (SECURITY_MIN_CONFIDENCE).
-                                             Survivors become Finding objects explicitly
-                                             marked validation_status="needs_review" -- never
-                                             "accepted", since nothing has independently
-                                             checked them. Phase 2 replaces this function's
-                                             internals with real evidence-based validation
+review.decision.decide -> validation.validator.validate
+                                           -- location + diff-relevance + AST-context checks
+                                             (validation/evidence.py), static-analysis
+                                             corroboration against chunk["static_matches"],
+                                             an overstated-certainty wording penalty
+                                             (validation/rules.py), then a weighted score
+                                             (35% diff evidence / 30% static corroboration /
+                                             20% AST consistency / 15% LLM confidence --
+                                             confidence alone can never cross
+                                             VALIDATION_ACCEPT_THRESHOLD) -> accepted /
+                                             needs_review / rejected. Then
+                                             validation.deduplication collapses overlapping
+                                             same-file/category findings, keeping the
+                                             highest-scored
         |
-github.comments.post_review_comment       -- one line-anchored inline comment per finding,
-                                             capped at MAX_COMMENTS_PER_PR, then one PR-level
-                                             summary via post_pr_comment (reporting/pr_summary.py)
+github.comments.post_review_comment       -- ONLY "accepted" findings get posted, one
+                                             line-anchored inline comment each, capped at
+                                             MAX_COMMENTS_PER_PR, then one PR-level summary
+                                             via post_pr_comment (reporting/pr_summary.py)
+                                             breaking down accepted/needs_review/rejected counts
 ```
-Every posted comment (inline and summary) explicitly says it's unvalidated
-— this is deliberate honesty about the pipeline's current state, not a
-placeholder to clean up. `driftwatch/analyzers/security.py`'s prompt lists
-the target categories from spec §14.1 (hardcoded secrets, unsafe command
-exec, SQL injection, unsafe deserialization, path traversal, weak crypto,
-insecure subprocess usage, dangerous dynamic eval) and instructs the model
-to be conservative and never invent files/lines/functions.
+`driftwatch/analyzers/security.py`'s prompt lists the target categories
+from spec §14.1 (hardcoded secrets, unsafe command exec, SQL injection,
+unsafe deserialization, path traversal, weak crypto, insecure subprocess
+usage, dangerous dynamic eval) and instructs the model to be conservative
+and never invent files/lines/functions — but the LLM is never the final
+authority; only `validate()`'s output decides what gets posted.
 
 ## Key implementation details
 
@@ -257,14 +293,39 @@ to be conservative and never invent files/lines/functions.
 - **`include_module_level` is opt-in** on `review.context.extract_changed_chunks`
   (default `False`). Only the security orchestrator passes `True`; doc-drift's
   call site is unchanged, so its behavior is identical to before Phase 1.
-  When `True`, it also attaches `anchor_line`/`imports`/`context_before`/
-  `context_after` to every chunk, function/class and module-level alike.
+  When `True`, it also attaches `anchor_line`/`diff_ranges`/`imports`/
+  `context_before`/`context_after` to every chunk, function/class and
+  module-level alike.
 - **Structured LLM output** (`llm/provider.py`): the security engine uses
   Gemini's `response_schema=list[CandidateFinding]` + `response_mime_type
   ="application/json"` rather than text parsing — deliberately different
   from doc-drift's `drafter.py`, which keeps its original line-based
   `VERDICT:`/`DRAFT:`/`REASON:` parsing untouched (no reason to touch
-  working code for a Phase 0/1 refactor).
+  working code that isn't part of the change being made).
+- **Static analysis runs against each chunk's own text as a standalone
+  file**, not the whole source file (`static_analysis/runner.py`) — loses
+  cross-function context (e.g. a sanitizer defined elsewhere in the file)
+  in exchange for one Semgrep/Bandit invocation per PR instead of per file.
+  A documented limitation, not an oversight; revisit if it causes missed
+  corroboration in practice.
+- **Executable resolution** (`static_analysis/executables.py`): Semgrep/
+  Bandit are invoked via `Path(sys.executable).parent / "<tool>.exe"`
+  rather than bare command names on `PATH`. This mattered in practice —
+  every static-analysis test silently returned zero matches until this
+  existed, because `PATH` doesn't reliably include the venv's `Scripts/`
+  directory unless the venv was "activated" first (directly invoking
+  `venv\Scripts\python.exe` doesn't set `PATH`). Falls back to `PATH`
+  resolution if the direct path doesn't exist.
+- **LLM confidence cannot alone cross the accept threshold** by
+  construction (`validation/scoring.py`): its weight is fixed at 15% of
+  the total score, so `confidence=1.0` with zero other evidence
+  contributes only `0.15` — well under `VALIDATION_ACCEPT_THRESHOLD`'s
+  default `0.75`. This is spec §17's explicit requirement, enforced by the
+  weight itself rather than a separate check.
+- **No static-analysis match does not mean rejected.** `validation/validator.py`
+  treats missing corroboration as one lower-weighted signal among several,
+  not a veto — a finding can still be `accepted` on strong diff/AST
+  evidence plus high LLM confidence alone if it clears the threshold.
 - **No `pyproject.toml`/`src/` layout, deliberately**: Render's actual
   build/start command isn't visible from this repo (no `render.yaml`/
   `Procfile`), so the package lives at `driftwatch/` (root-level, not
@@ -285,18 +346,31 @@ to be conservative and never invent files/lines/functions.
   different repo. (The old `test_auth.py`, which had the same hardcoded
   repo and was already broken/stale, was deleted during the Phase 0
   refactor — superseded by `tests/unit/test_github_auth.py`.)
-- `ast/` (the package) shares its name with Python's stdlib `ast` module.
-  Nothing in this codebase does `import ast` (tree-sitter is used instead),
-  so there's no actual collision — this matches the spec's naming (§8) and
-  is called out here so it isn't mistaken for an accident later.
+- `ast/` (the package) shares its name with Python's stdlib `ast` module,
+  and `static_analysis/semgrep.py` / `static_analysis/bandit.py` share
+  their names with the real installed `semgrep`/`bandit` packages. Neither
+  is an actual collision: nothing here does `import ast`/`import semgrep`/
+  `import bandit` (tree-sitter is used for AST parsing; Semgrep/Bandit are
+  only ever invoked as subprocesses), and these are always imported via
+  their full `driftwatch.*` path, never bare.
+- The bundled Semgrep ruleset (`static_analysis/rules/security.yml`, 7
+  rules) doesn't cover path traversal — syntactic patterns for it are
+  prone to high false positives without more context than a single-chunk
+  scan provides. Left to the LLM alone for now; no corroboration bonus for
+  that category specifically.
 - **No idempotency yet for duplicate webhook deliveries** on the security
   pipeline (spec §31) — a GitHub retry on the same `synchronize` event
   could double-post comments. Deliberately deferred to when Phase 2/3's
   `review_runs` persistence exists; documented as a known limitation in
   `docs/roadmap.md` rather than half-solved with something that wouldn't
   survive Render's free-tier spin-down anyway.
-- **The security pipeline has not been tested against a live PR yet.**
-  Local tests mock GitHub/Gemini; the actual Phase 1 exit criterion (a
-  seeded vulnerability in a real PR producing an accurate inline finding)
-  needs a real PR against `ashwinruke/Multithreaded_Web_Server`, which
-  needs a human with GitHub access.
+- **Live-verified**: PR #13 against `ashwinruke/Multithreaded_Web_Server`
+  with a seeded vulnerability produced a correct inline finding + PR
+  summary on the deployed Render service. That live test also surfaced a
+  pre-existing Render env var misconfiguration (`GITHUB_PRIVATE_KEY_PATH`
+  held key material instead of `GITHUB_PRIVATE_KEY` being set), which
+  briefly leaked the private key into logs via an unguarded exception
+  message — fixed in `github/auth.py` (`load_private_key()` now refuses
+  key-shaped content in `GITHUB_PRIVATE_KEY_PATH` with a clean error), key
+  rotated, Render env var corrected. See `docs/roadmap.md`'s Phase 1 report
+  for the full writeup.

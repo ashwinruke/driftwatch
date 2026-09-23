@@ -31,8 +31,10 @@ def test_finding_comment_includes_key_fields():
 
 def test_pr_summary_counts_by_category():
     finding = _finding()
-    summary = format_pr_summary(files_analyzed=3, candidates=[finding], posted=[finding])
+    accepted = finding.model_copy(update={"validation_status": "accepted"})
+    summary = format_pr_summary(files_analyzed=3, candidates=[finding], decided=[accepted], posted=[accepted])
     assert "Files analyzed: 3" in summary
     assert "Candidate findings: 1" in summary
-    assert "Posted findings: 1" in summary
+    assert "Validated findings: 1" in summary
+    assert "Posted as inline comments: 1" in summary
     assert "Security" in summary

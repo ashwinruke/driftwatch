@@ -1,0 +1,83 @@
+rules:
+  - id: subprocess-shell-true
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
+          - pattern: os.system(...)
+    message: >-
+      Shell command execution with shell=True or os.system -- risk of
+      command injection if any argument is derived from untrusted input.
+    languages: [python]
+    severity: ERROR
+
+  - id: dangerous-eval-exec
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+    message: >-
+      Dynamic evaluation via eval/exec -- risk of arbitrary code execution
+      if the argument is derived from untrusted input.
+    languages: [python]
+    severity: ERROR
+
+  - id: unsafe-deserialization-pickle
+    patterns:
+      - pattern-either:
+          - pattern: pickle.loads(...)
+          - pattern: pickle.load(...)
+    message: >-
+      Unsafe deserialization via pickle -- deserializing untrusted data can
+      lead to arbitrary code execution.
+    languages: [python]
+    severity: ERROR
+
+  - id: weak-hash-md5-sha1
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.md5(...)
+          - pattern: hashlib.sha1(...)
+    message: >-
+      Use of a weak cryptographic hash (MD5/SHA1) -- avoid for
+      security-sensitive purposes such as passwords or signatures.
+    languages: [python]
+    severity: WARNING
+
+  - id: requests-verify-false
+    patterns:
+      - pattern-either:
+          - pattern: requests.get(..., verify=False, ...)
+          - pattern: requests.post(..., verify=False, ...)
+          - pattern: requests.request(..., verify=False, ...)
+    message: >-
+      TLS certificate verification disabled (verify=False) -- vulnerable to
+      man-in-the-middle attacks.
+    languages: [python]
+    severity: ERROR
+
+  - id: hardcoded-secret-assignment
+    patterns:
+      - pattern: $VAR = "..."
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)^(.*_)?(api_key|apikey|secret|password|passwd|token|access_key|private_key)(_.*)?$
+    message: >-
+      Possible hardcoded secret/credential -- variable name suggests
+      sensitive material assigned as a string literal.
+    languages: [python]
+    severity: ERROR
+
+  - id: sql-injection-string-building
+    patterns:
+      - pattern-either:
+          - pattern: $CURSOR.execute(f"...")
+          - pattern: $CURSOR.execute("..." % ...)
+          - pattern: $CURSOR.execute("..." + ...)
+          - pattern: $CURSOR.execute("...".format(...))
+    message: >-
+      SQL query built via string formatting/concatenation instead of
+      parameterized placeholders -- risk of SQL injection.
+    languages: [python]
+    severity: ERROR

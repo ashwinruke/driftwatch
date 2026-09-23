@@ -123,7 +123,7 @@ Expose it for GitHub's webhook (dev only):
 
 The bot is being expanded into a modular AI code reviewer; see
 `docs/roadmap.md` and `driftwatch_ai_code_reviewer_agent_spec.md` for the
-full plan and phase status. As of Phase 1, the code lives under `driftwatch/`:
+full plan and phase status. As of Phase 2, the code lives under `driftwatch/`:
 
 | File | Purpose |
 |------|---------|
@@ -144,6 +144,8 @@ full plan and phase status. As of Phase 1, the code lives under `driftwatch/`:
 | driftwatch/analyzers/security.py | The security-review engine: prompt + LLM call |
 | driftwatch/llm/embeddings.py | Gemini embedding wrapper (doc-drift) |
 | driftwatch/llm/provider.py | LLMProvider protocol + GeminiProvider (structured JSON output) |
+| driftwatch/static_analysis/ | Offline Semgrep + Bandit adapters, run once per PR |
+| driftwatch/validation/ | The validation layer: location/diff/AST checks, scoring, dedup |
 | driftwatch/reporting/ | Inline-finding and PR-summary markdown formatting |
 | driftwatch/persistence/db.py | PostgreSQL/pgvector connection + schema |
 | driftwatch/retry.py | Retry-with-backoff wrapper for transient API failures |

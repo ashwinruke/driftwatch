@@ -16,15 +16,20 @@ Documentation drift becomes one review engine among several (security, bugs,
 quality, documentation), all sharing one `ReviewEngine` interface, one
 `Finding`/`Evidence` schema, and one validation/reporting pipeline.
 
-## Status: Phase 0 and Phase 1 done, Phase 2 not started
+## Status: Phase 0, 1 and 2 done, Phase 3 not started
 
 The repository has been reorganized into a `driftwatch/` package (see
 `CLAUDE.md`'s Architecture section for the current, accurate layout), and a
-security review engine now runs on `opened`/`synchronize`/`reopened` PR
-events, posting **unvalidated** inline findings + a PR summary (validation
-is Phase 2). Documentation drift is untouched throughout. Nothing from
-Phase 2 onward (validation layer, bug/quality engines, evaluation,
-dashboard) has been built yet.
+security review engine runs on `opened`/`synchronize`/`reopened` PR events.
+Findings are now evidence-grounded: a real validation layer (syntactic
+location/diff-relevance checks, offline Semgrep + Bandit corroboration,
+scoring, deduplication) decides accept/needs_review/reject before anything
+is posted — only `accepted` findings become inline comments. Documentation
+drift is untouched throughout. Phase 1 was confirmed live end-to-end; Phase
+2's validation behavior is demonstrated by spec §35's golden test cases
+running through the real pipeline (see the Phase 2 report below). Nothing
+from Phase 3 onward (evaluation framework, bug/quality engines, doc-drift
+integration, dashboard) has been built yet.
 
 ## Current baseline → target module mapping
 
@@ -87,13 +92,37 @@ Phase 1 additions (all new, no old-file equivalent):
 | `driftwatch/ast/parser.py` additions | `find_uncovered_ranges`, `extract_module_level_chunks`, `find_anchor_line`, `extract_imports`, `extract_surrounding_lines` |
 | `driftwatch/github/comments.py` addition | `post_review_comment()` — line-anchored PR review comment (vs. the existing PR-level `post_pr_comment`) |
 
-**Net-new, no current equivalent:** validation layer (§16-19), static
-analysis adapters for Semgrep/Bandit (§15), provider-independent LLM
-interface (§6, §14), `Finding`/`Evidence` schema (§9), security/bug/quality
-review engines (§14.1-14.3), evaluation framework + labeled dataset
-(§21/§24), Langfuse observability (§25), relational schema for review runs/
-findings/evidence (§28), and the Next.js + FastAPI multi-repo dashboard
-(§50-63).
+Phase 2 additions (all new, no old-file equivalent):
+
+| New file | Purpose |
+|---|---|
+| `driftwatch/static_analysis/rules/security.yml` | Bundled, offline Semgrep ruleset (7 rules) covering the same categories as the security prompt — no `--config auto`/registry dependency at request time |
+| `driftwatch/static_analysis/semgrep.py`, `bandit.py` | Subprocess adapters, JSON output → normalized `StaticMatch`; never raise, a failed/missing/timed-out tool just yields no corroboration |
+| `driftwatch/static_analysis/executables.py` | Resolves a console-script executable relative to `sys.executable` rather than relying on PATH — needed because bare `"semgrep"`/`"bandit"` aren't reliably resolvable when Python is invoked without activating the venv first (found while testing this phase) |
+| `driftwatch/static_analysis/runner.py` | Runs Semgrep + Bandit once per PR (not once per chunk — CLI startup alone is ~1-3s each) against a temp directory of all changed chunks, remaps line numbers back to each chunk |
+| `driftwatch/validation/evidence.py` | Spec §16.1 Stages A (location) + B (diff relevance, syntactic only) + C (AST context) as one pass |
+| `driftwatch/validation/rules.py` | Stage E: deterministic keyword heuristic for overstated-certainty wording, downgrades score, never a second LLM call |
+| `driftwatch/validation/scoring.py` | `ValidationResult` + `compute_score()` (35/30/20/15 weights per spec §17) + `decide_status()` against `VALIDATION_ACCEPT_THRESHOLD`/`VALIDATION_REVIEW_THRESHOLD` |
+| `driftwatch/validation/deduplication.py` | Stage F: collapse same-file/same-category/overlapping-line findings, keep the highest-scored |
+| `driftwatch/validation/validator.py` | `validate(candidate, chunk) -> ValidationResult`, composing the above |
+
+`driftwatch/review/decision.py`'s internals were replaced (same call
+signature as Phase 1) to call `validate()` per candidate instead of a
+confidence floor; `SECURITY_MIN_CONFIDENCE` was removed from
+`app/config.py` — LLM confidence is now one weighted input (15%) into the
+real score, not a standalone gate. `driftwatch/review/orchestrator.py` now
+calls `run_static_analysis()` once per PR before deciding, and only posts
+`accepted` findings. `reporting/pr_summary.py` and `comment_formatter.py`
+now show real validation status/score/evidence instead of Phase 1's
+blanket "unvalidated" disclaimer.
+
+**Still net-new, no current equivalent (as of Phase 2):** bug/quality review
+engines (§14.2/§14.3 — only security exists), evaluation framework +
+labeled dataset (§21/§24), Langfuse observability (§25), relational schema
+for review runs/findings/evidence (§28 — validation results aren't
+persisted yet, just logged), Gitleaks/CodeQL, and the Next.js + FastAPI
+multi-repo dashboard (§50-63). The validation layer (§16-19) and Semgrep/
+Bandit adapters (§15) — previously net-new — were built in Phase 2.
 
 ## Phased plan
 
@@ -103,8 +132,8 @@ phase out of order — each has an explicit exit criterion in the spec.
 | Phase | Goal | Exit criteria (see spec for full list) | Status |
 |---|---|---|---|
 | **0 — Repository assessment & refactor** | Prepare the existing repo: package boundaries, separate GitHub plumbing from the doc-drift engine, add typing/tests | Doc-drift flow still works; new architecture documented; no unnecessary rewrite | **Done** |
-| 1 — GitHub PR review MVP | Webhooks for opened/synchronize/reopened, Python diff/context analysis, LLM provider interface, security engine first, inline comments + PR summary | A seeded vulnerability in a test PR produces one accurate inline finding | **Code done — live test pending** |
-| 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | Not started |
+| 1 — GitHub PR review MVP | Webhooks for opened/synchronize/reopened, Python diff/context analysis, LLM provider interface, security engine first, inline comments + PR summary | A seeded vulnerability in a test PR produces one accurate inline finding | **Done — live-verified** |
+| 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases verified** |
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | Not started |
 | 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | Not started |
 | 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | Not started |
@@ -185,12 +214,84 @@ events still route to the untouched doc-drift handler and don't also
 trigger a security review. `main.py` still imports cleanly against the real
 `.env`.
 
-**Not yet done — needs a live test:** no real GitHub/Gemini call has been
-made. The actual exit criterion (a seeded vulnerability in a real PR
-producing an accurate inline finding) requires opening a test PR against
-`ashwinruke/Multithreaded_Web_Server` with a seeded vulnerability and
-confirming the App posts a correct inline comment — that's a manual,
-credentialed step for the repo owner, not something run automatically.
+**Live-tested and confirmed:** PR #13 ("Create test-driftwatch.py") against
+`ashwinruke/Multithreaded_Web_Server` with a seeded vulnerability produced a
+correct inline security finding + PR summary on the deployed Render
+service. Phase 1's exit criterion is met.
+
+**Unplanned but valuable side effect of the live test:** it surfaced a
+pre-existing Render misconfiguration (`GITHUB_PRIVATE_KEY_PATH` held actual
+key material instead of `GITHUB_PRIVATE_KEY` being set), which in turn
+caused the key to be embedded in a `FileNotFoundError` message and logged.
+Fixed in `driftwatch/github/auth.py`: `load_private_key()` now detects
+key-shaped content in `GITHUB_PRIVATE_KEY_PATH` and fails with a clean
+error instead (regression test in `tests/unit/test_github_auth.py`). The
+exposed key was rotated and the Render env var corrected. This bug predates
+Phase 0/1 — `load_private_key()`'s core logic was never changed by the
+refactor, it just had never been exercised in production before Phase 1's
+`opened`-PR trigger made the first real token request there.
+
+## Phase 2 report
+
+Validation layer implemented per the mapping table above. Every accepted
+finding is now genuinely evidence-grounded: location/diff-relevance
+checked syntactically, corroborated where possible against a real,
+offline Semgrep + Bandit run, scored with LLM confidence capped at 15% of
+the total (cannot alone cross `VALIDATION_ACCEPT_THRESHOLD`), deduplicated,
+and only posted if the result is `accepted`.
+
+**One correctness issue found and fixed during implementation:** bare
+`"semgrep"`/`"bandit"` command names aren't reliably resolvable via
+`subprocess.run` when the venv hasn't been "activated" (only affects
+`PATH`, not which Python/console-scripts actually exist) — this surfaced
+immediately as every static-analysis test silently returning zero matches.
+Fixed with `static_analysis/executables.py`, which resolves each tool
+relative to `sys.executable`'s directory instead of relying on `PATH`.
+Worth calling out because the same class of issue could affect Render's
+deployment environment depending on how its PATH is configured; this fix
+makes that irrelevant either way.
+
+**Demonstrating the phase's actual point** (spec §35's golden cases, now
+real tests in `tests/integration/test_validator_golden_cases.py`, run
+against the real validator + real offline Semgrep/Bandit):
+- SQL injection (f-string built query) → **accepted** (Semgrep
+  corroboration + diff overlap + LLM confidence).
+- Unsafe `shell=True` → **accepted** (same reasoning).
+- Safe parameterized query / safe list-form `subprocess.run` / a harmless
+  refactor → no static-analysis corroboration for an injection-style issue
+  (Bandit's generic low-severity "review this subprocess call" notices are
+  expected and don't count as vulnerability corroboration).
+- A finding with overstated wording ("this will always cause RCE,
+  guaranteed") scores measurably lower than the same finding described
+  accurately, even with identical underlying evidence.
+- `tests/integration/test_security_review_flow.py` now demonstrates the
+  concrete before/after: a finding that would have cleared Phase 1's bare
+  0.6 confidence floor (0.7 confidence, no corroboration) now correctly
+  lands in `needs_review` (score ≈0.655) and does **not** get posted.
+
+**Known limitations** (documented, not silently skipped):
+- No symbol/data-flow tracking — diff relevance is syntactic line-range
+  overlap only, per spec's own caution against claiming data-flow proof
+  from syntactic evidence alone.
+- Static analysis runs against each chunk's own text as a standalone file,
+  not the whole source file — loses cross-function context (e.g. a
+  sanitizer defined elsewhere in the file). Acceptable for the target
+  categories, which are mostly local/single-function patterns.
+- `needs_review`/`rejected` findings are logged, not persisted — the
+  `review_runs`/`findings` schema (spec §28) and the evaluation runner
+  that will consume that history are both Phase 3 work.
+- The bundled Semgrep ruleset (7 rules) doesn't cover path traversal —
+  syntactic path-traversal patterns are prone to high false-positive rates
+  without more context than a single-chunk scan gives; left to the LLM
+  alone for now (no corroboration bonus for that category specifically).
+
+**Verified:** `pytest tests/unit tests/integration -v` → 67 passed
+(28 new since Phase 1), including real (offline, no network) Semgrep/Bandit
+subprocess runs. `main.py` still imports cleanly against the real `.env`.
+No live re-test against a real PR was done for this phase — the golden
+cases already demonstrate the validation mechanism directly, and Phase 1
+already proved the live posting path works; trying it live is optional,
+not required to consider Phase 2 done.
 
 ## Mandatory engineering rules (spec §42, condensed)
 

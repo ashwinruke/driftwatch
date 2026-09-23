@@ -30,6 +30,8 @@ def extract_changed_chunks(owner: str, repo: str, pr_number: int, token: str, in
       function/class (e.g. a module-level hardcoded secret)
     - computes an anchor_line per chunk (the first actually-changed line
       within it, required for posting a line-anchored review comment)
+    - attaches diff_ranges (the file's changed line ranges), used by the
+      validation layer's diff-relevance check
     - attaches top-level imports and a few lines of surrounding context
     Doc-drift's call site doesn't pass this, so its behavior is unchanged."""
     files = get_pr_files(owner, repo, pr_number, token)
@@ -60,6 +62,7 @@ def extract_changed_chunks(owner: str, repo: str, pr_number: int, token: str, in
             chunk["file"] = path
             if include_module_level:
                 chunk["anchor_line"] = find_anchor_line(chunk["start_line"], chunk["end_line"], ranges)
+                chunk["diff_ranges"] = ranges
                 chunk["imports"] = extract_imports(source_bytes)
                 context_before, context_after = extract_surrounding_lines(source_bytes, chunk["start_line"], chunk["end_line"])
                 chunk["context_before"] = context_before
