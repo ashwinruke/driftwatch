@@ -25,8 +25,8 @@ Findings are now evidence-grounded: a real validation layer (syntactic
 location/diff-relevance checks, offline Semgrep + Bandit corroboration,
 scoring, deduplication) decides accept/needs_review/reject before anything
 is posted — only `accepted` findings become inline comments. Documentation
-drift is untouched throughout. Phase 1 was confirmed live end-to-end; Phase
-2's validation behavior is demonstrated by spec §35's golden test cases
+drift is untouched throughout. Phases 1 and 2 are both confirmed live
+end-to-end against a real PR, on top of spec §35's golden test cases
 running through the real pipeline (see the Phase 2 report below). Nothing
 from Phase 3 onward (evaluation framework, bug/quality engines, doc-drift
 integration, dashboard) has been built yet.
@@ -133,7 +133,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 |---|---|---|---|
 | **0 — Repository assessment & refactor** | Prepare the existing repo: package boundaries, separate GitHub plumbing from the doc-drift engine, add typing/tests | Doc-drift flow still works; new architecture documented; no unnecessary rewrite | **Done** |
 | 1 — GitHub PR review MVP | Webhooks for opened/synchronize/reopened, Python diff/context analysis, LLM provider interface, security engine first, inline comments + PR summary | A seeded vulnerability in a test PR produces one accurate inline finding | **Done — live-verified** |
-| 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases verified** |
+| 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases + live-verified** |
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | Not started |
 | 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | Not started |
 | 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | Not started |
@@ -285,13 +285,43 @@ against the real validator + real offline Semgrep/Bandit):
   without more context than a single-chunk scan gives; left to the LLM
   alone for now (no corroboration bonus for that category specifically).
 
-**Verified:** `pytest tests/unit tests/integration -v` → 67 passed
-(28 new since Phase 1), including real (offline, no network) Semgrep/Bandit
+**Verified:** `pytest tests/unit tests/integration -v` → 74 passed
+(35 new since Phase 1), including real (offline, no network) Semgrep/Bandit
 subprocess runs. `main.py` still imports cleanly against the real `.env`.
-No live re-test against a real PR was done for this phase — the golden
-cases already demonstrate the validation mechanism directly, and Phase 1
-already proved the live posting path works; trying it live is optional,
-not required to consider Phase 2 done.
+
+**Live-tested and confirmed** against `ashwinruke/Multithreaded_Web_Server`,
+with a seeded `subprocess.run(x, shell=True)` finding correctly validated
+(Bandit B602 + bundled Semgrep rule corroboration) and posted with the new
+evidence/score-bearing comment format. Getting there surfaced four real
+issues, none of them hypothetical — all found and fixed live, in order:
+
+1. **`requirements.txt` broke Render's Linux build.** `pip freeze` on the
+   local Windows dev venv flattened `pywin32`'s environment marker (a
+   conditional dependency of `mcp`/`semgrep`, Windows-only), pinning it
+   unconditionally. Fixed by restoring the `; sys_platform == "win32"`
+   marker.
+2. **Chunk extraction returned nothing, silently.** `review/context.py`
+   skipped non-`.py`/removed files with no log line, so a `Files analyzed:
+   0` result gave no clue why. Every skip path now logs its reason, plus a
+   summary line.
+3. **Webhook delivery timed out before Render could even respond.**
+   GitHub's webhook delivery has a hard ~10s timeout; Phase 2 added real
+   Semgrep/Bandit subprocess calls on top of the existing GitHub API +
+   Gemini calls, all running synchronously inside the request handler —
+   enough to exceed that timeout even when Render was awake. Fixed by
+   moving the actual review to a FastAPI `BackgroundTask`, so the webhook
+   acknowledges immediately and the review runs after the response is
+   sent.
+4. **Gemini returned a live 503** ("high demand"). Added `GroqProvider` +
+   a provider-agnostic `FallbackProvider` (spec §6 asks for exactly this
+   provider independence) — falls back to Groq's OpenAI-compatible API on
+   any Gemini failure when `GROQ_API_KEY` is set, otherwise behaves exactly
+   as before.
+
+None of these were caught by the test suite beforehand, since none of them
+are reachable from mocked GitHub/Gemini calls — a reminder that the local
+suite (deliberately) doesn't substitute for a live pass against the real
+deployment, GitHub App, and external APIs.
 
 ## Mandatory engineering rules (spec §42, condensed)
 
