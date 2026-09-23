@@ -91,8 +91,12 @@ Required env vars (`.env`, gitignored): `GITHUB_APP_ID`,
 `MAX_COMMENTS_PER_PR` (default `3`), `VALIDATION_ACCEPT_THRESHOLD` (default
 `0.75`) and `VALIDATION_REVIEW_THRESHOLD` (default `0.50`) — the score
 cutoffs the validation layer uses to decide accepted/needs_review/rejected
-(see Architecture below). All of these except the private-key pair are
-read once in `driftwatch/app/config.py`.
+(see Architecture below); `GROQ_API_KEY` and `GROQ_MODEL` (default
+`openai/gpt-oss-120b`) — if `GROQ_API_KEY` is set, the security engine
+falls back to Groq's OpenAI-compatible API when Gemini fails (added after
+a live 503 from Gemini under high demand); if unset, Gemini is used alone,
+same as before. All of these except the private-key pair are read once in
+`driftwatch/app/config.py`.
 
 Semgrep and Bandit (installed via `requirements.txt`) must be present as
 CLI executables for the security pipeline's static-analysis corroboration
@@ -218,9 +222,14 @@ analyzers.security.analyze                -- builds a security-focused prompt pe
                                              calls the LLM provider, filters to category
                                              == "security"
         |
-llm.provider.GeminiProvider.generate_findings  -- Gemini structured JSON output
-                                             (response_schema=list[CandidateFinding]),
-                                             parsed by the pure, independently-testable
+llm.provider.<GeminiProvider or FallbackProvider>.generate_findings  -- Gemini structured
+                                             JSON output (response_schema=list[CandidateFinding]).
+                                             If GROQ_API_KEY is set, wrapped in a
+                                             FallbackProvider that retries via Groq's
+                                             OpenAI-compatible API on any Gemini failure
+                                             (added after a live 503 from Gemini under high
+                                             demand) -- otherwise Gemini alone. Both parse
+                                             through the same pure, independently-testable
                                              parse_findings_response()
         |
 review.decision.decide -> validation.validator.validate
@@ -326,6 +335,15 @@ authority; only `validate()`'s output decides what gets posted.
   treats missing corroboration as one lower-weighted signal among several,
   not a veto — a finding can still be `accepted` on strong diff/AST
   evidence plus high LLM confidence alone if it clears the threshold.
+- **LLM fallback** (`llm/provider.py`): `FallbackProvider` is provider-agnostic
+  by design — it only knows both providers implement `generate_findings(prompt)
+  -> list[CandidateFinding]`, and retries via the fallback on *any* exception
+  from the primary. Groq's `json_object` mode (unlike Gemini's
+  `response_schema`) doesn't enforce a specific shape, so `GroqProvider`
+  appends a JSON-schema description (generated from `CandidateFinding
+  .model_json_schema()`, not hand-duplicated) to the prompt, and asks for
+  `{"findings": [...]}` rather than a bare array — `parse_findings_response()`
+  accepts both shapes so both providers share the identical parsing path.
 - **No `pyproject.toml`/`src/` layout, deliberately**: Render's actual
   build/start command isn't visible from this repo (no `render.yaml`/
   `Procfile`), so the package lives at `driftwatch/` (root-level, not

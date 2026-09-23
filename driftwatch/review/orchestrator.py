@@ -4,7 +4,7 @@ from driftwatch.analyzers import security
 from driftwatch.app import config
 from driftwatch.github.auth import get_installation_token
 from driftwatch.github.comments import post_pr_comment, post_review_comment
-from driftwatch.llm.provider import GeminiProvider
+from driftwatch.llm.provider import FallbackProvider, GeminiProvider, GroqProvider
 from driftwatch.reporting.comment_formatter import format_finding_comment
 from driftwatch.reporting.pr_summary import format_pr_summary
 from driftwatch.retry import with_retry
@@ -14,7 +14,9 @@ from driftwatch.static_analysis.runner import run_static_analysis
 
 logger = logging.getLogger("driftwatch")
 
-_provider = GeminiProvider()
+# Falls back to Groq if GROQ_API_KEY is configured (Gemini can return 503s
+# under high demand); otherwise Gemini alone, matching pre-fallback behavior.
+_provider = FallbackProvider(GeminiProvider(), GroqProvider()) if config.GROQ_API_KEY else GeminiProvider()
 
 
 def review_pull_request(payload: dict):
