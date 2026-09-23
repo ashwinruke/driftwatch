@@ -1,8 +1,8 @@
 import logging
-import httpx
-from embeddings import get_embedding
-from db import get_connection
-from embeddings import get_embedding
+
+from driftwatch.github import client
+from driftwatch.llm.embeddings import get_embedding
+from driftwatch.persistence.db import get_connection
 
 logger = logging.getLogger("driftwatch")
 
@@ -87,13 +87,9 @@ def _split_into_paragraphs(content: str) -> list[str]:
 
 def fetch_markdown_files(owner: str, repo: str, token: str, path: str = "") -> list[dict]:
     """Recursively fetch all .md files from a repo via GitHub API."""
-    resp = httpx.get(
-        f"https://api.github.com/repos/{owner}/{repo}/contents/{path}",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-    )
-    resp.raise_for_status()
+    items = client.get(f"/repos/{owner}/{repo}/contents/{path}", token).json()
     files = []
-    for item in resp.json():
+    for item in items:
         if item["type"] == "file" and item["name"].endswith(".md"):
             files.append(item)
         elif item["type"] == "dir":
@@ -112,10 +108,7 @@ def index_repo_docs(owner: str, repo: str, token: str):
     logger.info(f"Found {len(md_files)} markdown files in {owner}/{repo}")
 
     for f in md_files:
-        raw = httpx.get(
-            f["download_url"],
-            headers={"Authorization": f"Bearer {token}"},
-        ).text
+        raw = client.get_content(f["download_url"], token)
 
         sections = split_markdown_into_sections(raw)
         for section in sections:
@@ -138,6 +131,7 @@ def index_repo_docs(owner: str, repo: str, token: str):
     cur.close()
     conn.close()
     logger.info(f"Doc index complete for {owner}/{repo}")
+
 
 def remove_file_from_index(repo: str, file_path: str):
     """Remove all indexed sections for a specific file (e.g. when it's deleted)."""
@@ -173,10 +167,7 @@ def index_specific_files(owner: str, repo: str, token: str, added_or_modified: l
             (repo_full, file_path)
         )
 
-        resp = httpx.get(
-            f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-        )
+        resp = client.get_optional(f"/repos/{owner}/{repo}/contents/{file_path}", token)
         if resp.status_code == 404:
             # File was in the push payload but no longer exists at HEAD (rare edge case)
             logger.info(f"Skipping {file_path}: not found at current HEAD")
@@ -188,7 +179,7 @@ def index_specific_files(owner: str, repo: str, token: str, added_or_modified: l
             logger.info(f"Skipping {file_path}: no download URL (possibly a directory or symlink)")
             continue
 
-        raw = httpx.get(download_url, headers={"Authorization": f"Bearer {token}"}).text
+        raw = client.get_content(download_url, token)
         sections = split_markdown_into_sections(raw)
 
         for section in sections:

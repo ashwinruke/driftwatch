@@ -1,6 +1,7 @@
 import logging
-from embeddings import get_embedding
-from db import get_connection
+
+from driftwatch.llm.embeddings import get_embedding
+from driftwatch.persistence.db import get_connection
 
 logger = logging.getLogger("driftwatch")
 

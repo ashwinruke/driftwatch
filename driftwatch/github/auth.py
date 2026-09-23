@@ -1,7 +1,8 @@
-import time
-import jwt
-import httpx
 import os
+import time
+
+import httpx
+import jwt
 
 
 def load_private_key() -> str:

@@ -1,16 +1,4 @@
-import httpx
-
 CODE_FENCE = "```"
-
-
-def post_pr_comment(owner: str, repo: str, pr_number: int, token: str, body: str):
-    resp = httpx.post(
-        f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-        json={"body": body},
-    )
-    resp.raise_for_status()
-    return resp.json()
 
 
 def format_drift_comment(chunk: dict, doc_section: dict, draft_result: dict) -> str:

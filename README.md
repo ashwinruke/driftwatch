@@ -121,23 +121,38 @@ Expose it for GitHub's webhook (dev only):
 
 ## Project structure
 
+The bot is being expanded into a modular AI code reviewer; see
+`docs/roadmap.md` and `driftwatch_ai_code_reviewer_agent_spec.md` for the
+full plan and phase status. As of Phase 1, the code lives under `driftwatch/`:
+
 | File | Purpose |
 |------|---------|
-| main.py | FastAPI app, webhook routes (PR merges + doc pushes), event filtering, comment cap |
-| github_auth.py | GitHub App JWT + installation token exchange (file or env-var key) |
-| diff_extractor.py | Fetches PR diffs, uses tree-sitter to find changed functions/classes |
-| db.py | PostgreSQL/pgvector connection + schema |
-| embeddings.py | Gemini embedding wrapper |
-| doc_indexer.py | Crawls markdown docs, splits into paragraph-level sections, embeds, stores; supports full and incremental re-index |
-| matcher.py | Embeds changed code, runs similarity search against doc index |
-| drafter.py | LLM verification + drafted update suggestion (Gemini 2.5 Flash) |
-| pr_commenter.py | Formats and posts the drift comment to the PR |
-| retry.py | Retry-with-backoff wrapper for transient API failures |
+| main.py | Thin entrypoint: builds the FastAPI app, includes the webhook router |
+| db.py | Thin entrypoint for `python db.py` (schema setup) |
 | index_now.py | One-off script to build the initial doc index for a repo |
+| driftwatch/app/config.py | Single source of truth for env vars |
+| driftwatch/github/auth.py | GitHub App JWT + installation token exchange (file or env-var key) |
+| driftwatch/github/client.py | Shared GitHub API httpx helpers |
+| driftwatch/github/webhooks.py | Webhook routes (PR merges, opens/syncs, doc pushes), signature verification, event dispatch |
+| driftwatch/github/comments.py | Posts a PR-level comment or a line-anchored review comment |
+| driftwatch/ast/parser.py | tree-sitter chunk extraction, module-level fallback, line-anchoring, import/context extraction |
+| driftwatch/review/context.py | Fetches PR diffs and extracts changed code chunks |
+| driftwatch/review/models.py | CandidateFinding / Finding / Evidence schema |
+| driftwatch/review/decision.py | Phase 1: confidence-floor filter (Phase 2 will add real validation here) |
+| driftwatch/review/orchestrator.py | Security-review pipeline: context → engine → decision → reporting |
+| driftwatch/analyzers/documentation/ | The doc-drift engine: indexer, matcher, drafter, formatting |
+| driftwatch/analyzers/security.py | The security-review engine: prompt + LLM call |
+| driftwatch/llm/embeddings.py | Gemini embedding wrapper (doc-drift) |
+| driftwatch/llm/provider.py | LLMProvider protocol + GeminiProvider (structured JSON output) |
+| driftwatch/reporting/ | Inline-finding and PR-summary markdown formatting |
+| driftwatch/persistence/db.py | PostgreSQL/pgvector connection + schema |
+| driftwatch/retry.py | Retry-with-backoff wrapper for transient API failures |
+| tests/unit/, tests/integration/ | pytest coverage — pure logic, plus webhook flows with GitHub/Gemini mocked |
 
-## Roadmap (v2.0, not yet started)
+## Roadmap
 
-- Multi-repo support (config table of enrolled repos)
-- Drift history dashboard
-- Slack notifications alongside PR comments
-- JS/TS support via tree-sitter-javascript / tree-sitter-typescript
+DriftWatch is being expanded from a documentation-drift bot into a modular
+AI code reviewer (security/bug/quality review engines behind a validation
+layer, evaluation metrics, and eventually a multi-repo dashboard). See
+`docs/roadmap.md` for the phased plan and current status, and
+`driftwatch_ai_code_reviewer_agent_spec.md` for the full engineering spec.

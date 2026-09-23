@@ -1,11 +1,9 @@
-import os
-from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-load_dotenv()
+from driftwatch.app import config
 
-_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 
 def get_embedding(text: str) -> list[float]:

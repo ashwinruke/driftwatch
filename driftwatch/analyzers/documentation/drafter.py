@@ -1,10 +1,8 @@
-import os
-from dotenv import load_dotenv
 from google import genai
 
-load_dotenv()
+from driftwatch.app import config
 
-_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 DRAFT_PROMPT = """You are reviewing a documentation section that may be outdated because related code changed.
 
@@ -67,5 +65,3 @@ def draft_update(code_chunk: dict, doc_section: dict) -> dict:
     reason = " ".join(reason_lines).strip()
 
     return {"verdict": verdict, "draft": draft, "reason": reason, "raw": text}
-
-    
