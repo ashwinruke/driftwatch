@@ -3,7 +3,7 @@ import hmac
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from driftwatch.analyzers.documentation import (
     draft_update,
@@ -31,7 +31,12 @@ def verify_signature(payload_body: bytes, signature_header: str, secret: str) ->
 
 
 @router.post("/webhook")
-async def github_webhook(request: Request):
+async def github_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Verifies the signature and dispatches, then returns immediately.
+    GitHub's webhook delivery has a hard timeout (~10s); the actual review
+    -- token exchange, GitHub API calls, Semgrep/Bandit subprocesses,
+    Gemini calls -- can easily take longer than that, so it runs as a
+    background task after the response is sent rather than inline."""
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
 
@@ -44,13 +49,13 @@ async def github_webhook(request: Request):
     if event == "pull_request":
         action = payload.get("action")
         if action == "closed" and payload["pull_request"].get("merged"):
-            _handle_pr_merged(payload)
+            background_tasks.add_task(_handle_pr_merged, payload)
         elif action in {"opened", "synchronize", "reopened"}:
-            review_pull_request(payload)
+            background_tasks.add_task(review_pull_request, payload)
         else:
             logger.info(f"Ignored pull_request action: {action}")
     elif event == "push":
-        _handle_push(payload)
+        background_tasks.add_task(_handle_push, payload)
     else:
         logger.info(f"Ignored event: {event} / action: {payload.get('action')}")
 

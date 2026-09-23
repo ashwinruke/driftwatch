@@ -35,11 +35,16 @@ def extract_changed_chunks(owner: str, repo: str, pr_number: int, token: str, in
     - attaches top-level imports and a few lines of surrounding context
     Doc-drift's call site doesn't pass this, so its behavior is unchanged."""
     files = get_pr_files(owner, repo, pr_number, token)
+    logger.info(f"PR #{pr_number}: {len(files)} file(s) changed")
     results = []
 
     for f in files:
         path = f["filename"]
-        if not path.endswith(".py") or f["status"] == "removed":
+        if not path.endswith(".py"):
+            logger.info(f"Skipping {path}: not a Python file")
+            continue
+        if f["status"] == "removed":
+            logger.info(f"Skipping {path}: file was removed")
             continue
 
         patch = f.get("patch")
@@ -49,6 +54,7 @@ def extract_changed_chunks(owner: str, repo: str, pr_number: int, token: str, in
 
         ranges = changed_line_ranges(patch)
         if not ranges:
+            logger.info(f"Skipping {path}: no changed line ranges parsed from patch")
             continue
 
         source_bytes = get_blob_content(owner, repo, f["sha"], token)
@@ -69,4 +75,5 @@ def extract_changed_chunks(owner: str, repo: str, pr_number: int, token: str, in
                 chunk["context_after"] = context_after
             results.append(chunk)
 
+    logger.info(f"PR #{pr_number}: {len(results)} chunk(s) extracted for analysis")
     return results
