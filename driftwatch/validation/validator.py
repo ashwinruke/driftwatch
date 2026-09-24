@@ -21,10 +21,11 @@ def _corroborating_matches(candidate: CandidateFinding, static_matches: list[Sta
     ]
 
 
-def validate(candidate: CandidateFinding, chunk: dict) -> ValidationResult:
-    """The validation layer: a candidate finding is trustworthy enough to
-    post only if this returns "accepted". Never treats LLM confidence
-    alone as sufficient -- see scoring.compute_score."""
+def validate_security(candidate: CandidateFinding, chunk: dict) -> ValidationResult:
+    """Stages A-E for a code finding: location/diff/AST checks, static-
+    analysis corroboration, claim-consistency wording, then a weighted
+    score. Never treats LLM confidence alone as sufficient -- see
+    scoring.compute_score."""
     syntactic = validate_syntactic(candidate, chunk)
     if not syntactic.passed:
         return ValidationResult(status="rejected", score=0.0, reasons=syntactic.reasons, evidence=syntactic.evidence)
@@ -67,3 +68,50 @@ def validate(candidate: CandidateFinding, chunk: dict) -> ValidationResult:
     status = decide_status(score)
     logger.info(f"Validated '{candidate.title}': {status} (score={round(score, 3)})")
     return ValidationResult(status=status, score=round(score, 3), reasons=reasons, evidence=evidence)
+
+
+def validate_documentation(candidate: CandidateFinding, chunk: dict) -> ValidationResult:
+    """Per spec §18: "Use the existing DriftWatch matching + verification
+    workflow, then pass the result through the common validation/reporting
+    pipeline." A documentation candidate only exists because it already
+    cleared doc-drift's own two-stage check (embedding similarity >=
+    threshold in matcher.py, then an LLM verdict of OUTDATED in
+    drafter.py) -- that already *is* the evidence-gathering for this
+    category. The code-specific checks in validate_security (location
+    within a code chunk, diff-line overlap, static-analysis corroboration)
+    don't apply: a documentation finding is about a doc file, not a line
+    of the diff, so this is a pass-through, not a weaker check."""
+    evidence = [
+        Evidence(
+            source="diff",
+            description=(
+                f"Changed {chunk['type']} '{chunk.get('name', chunk['file'])}' in {chunk['file']} "
+                f"matched this doc section by embedding similarity >= threshold"
+            ),
+            file_path=chunk["file"],
+            start_line=chunk["start_line"],
+            end_line=chunk["end_line"],
+        ),
+        Evidence(
+            source="llm",
+            description=candidate.reasoning_summary,
+            file_path=candidate.file_path,
+        ),
+    ]
+    score = round(candidate.confidence, 3)
+    logger.info(f"Validated '{candidate.title}' (documentation): accepted (score={score})")
+    return ValidationResult(
+        status="accepted",
+        score=score,
+        reasons=["Verified outdated by the existing doc-drift matching + LLM verification workflow"],
+        evidence=evidence,
+    )
+
+
+def validate(candidate: CandidateFinding, chunk: dict) -> ValidationResult:
+    """The validation layer: a candidate finding is trustworthy enough to
+    post only if this returns "accepted". Dispatches per spec §18, which
+    gives each category its own policy rather than one universal check."""
+    if candidate.category == "documentation":
+        return validate_documentation(candidate, chunk)
+    return validate_security(candidate, chunk)

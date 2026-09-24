@@ -1,6 +1,6 @@
 import logging
 
-from driftwatch.analyzers import security
+from driftwatch.analyzers.security import SecurityEngine
 from driftwatch.app import config
 from driftwatch.github.auth import get_installation_token
 from driftwatch.github.comments import post_pr_comment, post_review_comment
@@ -10,6 +10,7 @@ from driftwatch.reporting.pr_summary import format_pr_summary
 from driftwatch.retry import with_retry
 from driftwatch.review import decision
 from driftwatch.review.context import extract_changed_chunks
+from driftwatch.review.engine import ReviewContext
 from driftwatch.static_analysis.runner import run_static_analysis
 
 logger = logging.getLogger("driftwatch")
@@ -18,17 +19,24 @@ logger = logging.getLogger("driftwatch")
 # under high demand); otherwise Gemini alone, matching pre-fallback behavior.
 _provider = FallbackProvider(GeminiProvider(), GroqProvider()) if config.GROQ_API_KEY else GeminiProvider()
 
+# The engines that run over PR-opened/synchronize/reopened chunks. Just
+# security for now -- bug/quality engines get added here the same way
+# once they exist, with no other change needed in analyze_and_decide.
+_ENGINES = [SecurityEngine(_provider)]
+
 
 def analyze_and_decide(chunks: list[dict], repository: str, pr_title: str, pr_body: str, pr_number: int):
-    """Runs the security engine over every chunk, then validates the
+    """Runs every engine in _ENGINES over every chunk, then validates the
     results. Shared by the live webhook path (review_pull_request) and
     driftwatch.cli.evaluate, so evaluation measures the exact same code
     path production uses -- callers are responsible for having already run
     static analysis on the chunks (chunk["static_matches"]) beforehand."""
     candidates: list[tuple] = []
     for chunk in chunks:
-        findings = security.analyze(chunk, repository, pr_title, pr_body, _provider)
-        candidates.extend((finding, chunk) for finding in findings)
+        context = ReviewContext(chunk=chunk, repository=repository, pull_request=pr_number, pr_title=pr_title, pr_body=pr_body)
+        for engine in _ENGINES:
+            findings = engine.analyze(context)
+            candidates.extend((finding, chunk) for finding in findings)
 
     decided = decision.decide(candidates, repository, pr_number)
     return candidates, decided

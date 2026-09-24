@@ -1,41 +1,41 @@
 # DriftWatch Evaluation Report
 
-Generated: 2026-09-23T07:49:16.374479+00:00
+Generated: 2026-09-24T05:59:44.735257+00:00
 Fixtures: 10 (4 expected a finding, 6 expected clean)
 
 ## Before vs. after validation
 
 | | Precision | Recall | F1 | False positive rate |
 |---|---:|---:|---:|---:|
-| Before validation (any LLM candidate posted) | 0.80 | 1.00 | 0.89 | 0.17 |
+| Before validation (any LLM candidate posted) | 1.00 | 1.00 | 1.00 | 0.00 |
 | After validation (only accepted posted) | 1.00 | 1.00 | 1.00 | 0.00 |
 
 ## Validation pipeline stats
 
-- Total candidate findings: 6
-- Accepted: 5
+- Total candidate findings: 4
+- Accepted: 4
 - Rejected: 0
-- Needs review: 1
-- Validation acceptance rate: 0.83
+- Needs review: 0
+- Validation acceptance rate: 1.00
 - Rejected rate: 0.00
 - Static-analysis agreement rate (accepted findings with Semgrep/Bandit corroboration): 1.00
-- Average findings per fixture: 0.50
-- Average latency per fixture: 14.49s (median 13.68s)
+- Average findings per fixture: 0.40
+- Average latency per fixture: 14.10s (median 14.16s)
 
 ## Per-fixture results
 
 | Fixture | Expected | Candidates | Accepted | Rejected | Needs review | Static-corroborated | Latency |
 |---|---|---:|---:|---:|---:|---:|---:|
-| sql_injection | yes | 1 | 1 | 0 | 0 | 1 | 15.05s |
-| shell_injection | yes | 1 | 1 | 0 | 0 | 1 | 15.51s |
-| hardcoded_secret | yes | 2 | 2 | 0 | 0 | 2 | 24.29s |
-| unsafe_eval | yes | 1 | 1 | 0 | 0 | 1 | 25.51s |
-| safe_parameterized_sql | no | 0 | 0 | 0 | 0 | 0 | 7.39s |
-| safe_subprocess | no | 0 | 0 | 0 | 0 | 0 | 10.25s |
-| config_constant_not_secret | no | 0 | 0 | 0 | 0 | 0 | 10.59s |
-| password_param_safe_use | no | 1 | 0 | 0 | 1 | 0 | 17.59s |
-| comment_only_change | no | 0 | 0 | 0 | 0 | 0 | 6.39s |
-| harmless_refactor | no | 0 | 0 | 0 | 0 | 0 | 12.31s |
+| sql_injection | yes | 1 | 1 | 0 | 0 | 1 | 14.02s |
+| shell_injection | yes | 1 | 1 | 0 | 0 | 1 | 14.88s |
+| hardcoded_secret | yes | 1 | 1 | 0 | 0 | 1 | 15.11s |
+| unsafe_eval | yes | 1 | 1 | 0 | 0 | 1 | 13.07s |
+| safe_parameterized_sql | no | 0 | 0 | 0 | 0 | 0 | 12.34s |
+| safe_subprocess | no | 0 | 0 | 0 | 0 | 0 | 14.27s |
+| config_constant_not_secret | no | 0 | 0 | 0 | 0 | 0 | 14.05s |
+| password_param_safe_use | no | 0 | 0 | 0 | 0 | 0 | 14.75s |
+| comment_only_change | no | 0 | 0 | 0 | 0 | 0 | 12.27s |
+| harmless_refactor | no | 0 | 0 | 0 | 0 | 0 | 16.20s |
 
 ## Known limitations
 

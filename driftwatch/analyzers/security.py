@@ -1,4 +1,5 @@
 from driftwatch.llm.provider import LLMProvider
+from driftwatch.review.engine import ReviewContext
 from driftwatch.review.models import CandidateFinding
 
 SECURITY_PROMPT = """You are a security-focused code reviewer analyzing a single change from a GitHub pull request.
@@ -53,3 +54,19 @@ def analyze(chunk: dict, repository: str, pr_title: str, pr_body: str, provider:
 
     findings = provider.generate_findings(prompt)
     return [f for f in findings if f.category == "security"]
+
+
+class SecurityEngine:
+    """ReviewEngine wrapper around analyze() (spec §14). The free function
+    stays the direct entry point for anything that doesn't need the
+    generic engine interface; this exists so orchestrator.analyze_and_decide
+    can iterate over a list of engines instead of calling one hardcoded
+    analyzer, ready for bug/quality engines to be added the same way later."""
+
+    name = "security"
+
+    def __init__(self, provider: LLMProvider):
+        self._provider = provider
+
+    def analyze(self, context: ReviewContext) -> list[CandidateFinding]:
+        return analyze(context.chunk, context.repository, context.pr_title, context.pr_body, self._provider)

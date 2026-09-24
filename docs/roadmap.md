@@ -16,7 +16,7 @@ Documentation drift becomes one review engine among several (security, bugs,
 quality, documentation), all sharing one `ReviewEngine` interface, one
 `Finding`/`Evidence` schema, and one validation/reporting pipeline.
 
-## Status: Phase 0, 1, 2 and 3 done, Phase 4 not started
+## Status: Phase 0, 1, 2, 3 and 4 done, Phase 5 not started
 
 The repository has been reorganized into a `driftwatch/` package (see
 `CLAUDE.md`'s Architecture section for the current, accurate layout), and a
@@ -24,15 +24,22 @@ security review engine runs on `opened`/`synchronize`/`reopened` PR events.
 Findings are now evidence-grounded: a real validation layer (syntactic
 location/diff-relevance checks, offline Semgrep + Bandit corroboration,
 scoring, deduplication) decides accept/needs_review/reject before anything
-is posted — only `accepted` findings become inline comments. Documentation
-drift is untouched throughout. Phases 1 and 2 are both confirmed live
-end-to-end against a real PR, on top of spec §35's golden test cases
-running through the real pipeline. `python -m driftwatch.cli.evaluate` now
-produces a real, checked-in metrics report
-(`evaluation/results/latest.{md,json}`) quantifying validation's actual
-effect — see the Phase 3 report below for the real numbers. Nothing from
-Phase 4 onward (bug/quality engines, doc-drift integration into a shared
-`ReviewEngine`, Langfuse, dashboard) has been built yet.
+is posted — only `accepted` findings become inline comments.
+`python -m driftwatch.cli.evaluate` produces a real, checked-in metrics
+report (`evaluation/results/latest.{md,json}`) quantifying validation's
+actual effect. As of Phase 4, documentation drift shares that same
+`CandidateFinding`/`decision.decide()`/reporting pipeline instead of its
+own bespoke path — a formal `ReviewEngine` protocol now exists (spec §14),
+with `SecurityEngine` as the first implementation; doc-drift's matching +
+verification logic is adapted into the same schema (see the Phase 4 report
+below for the schema-fit decisions this required) rather than wrapped in
+the same protocol literally, since it's triggered by a different webhook
+event entirely (merge, not open/sync/reopen). Phases 1 and 2 are confirmed
+live end-to-end against a real PR; Phase 4's local test suite passes (105
+tests) but it still needs a live merged-PR test before being fully signed
+off, given it rewrote the project's oldest, previously-live-stable code
+path — see the Phase 4 report below. Nothing from Phase 5 onward (bug/
+quality engines, Langfuse, CI, dashboard) has been built yet.
 
 ## Current baseline → target module mapping
 
@@ -138,7 +145,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 | 1 — GitHub PR review MVP | Webhooks for opened/synchronize/reopened, Python diff/context analysis, LLM provider interface, security engine first, inline comments + PR summary | A seeded vulnerability in a test PR produces one accurate inline finding | **Done — live-verified** |
 | 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases + live-verified** |
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | **Done — real report generated** |
-| 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | Not started |
+| 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | **Code done, pending live merge test** |
 | 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | Not started |
 | 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | Not started |
 
@@ -384,6 +391,84 @@ evaluated, since bug/quality engines don't exist yet.
 `python -m driftwatch.cli.evaluate` run for real against live Gemini/Groq
 credentials; `evaluation/results/latest.{md,json}` committed. `main.py`
 still imports cleanly against the real `.env`.
+
+**Live regression-tested**: since the two refactors
+(`extract_chunks_from_source`, `analyze_and_decide`) touch code the live
+webhook path shares, pushed to Render and re-ran the same kind of seeded
+`subprocess.run(..., shell=True)` PR from the Phase 2 live test. Identical
+class of result, this time with full corroboration: `Validation score:
+1.0`, `Static analysis: corroborated` (both Semgrep and Bandit), `LLM
+confidence: 1.0`. Confirms the refactor changed nothing about live
+behavior — evaluation and production now demonstrably share one code path,
+not two that could silently drift apart.
+
+## Phase 4 report
+
+Formal `ReviewEngine` Protocol + `ReviewContext` added (`review/engine.py`,
+spec §14); `SecurityEngine` (`analyzers/security.py`) is the first
+implementation, and `review/orchestrator.py`'s `analyze_and_decide` now
+loops over a list of engines (`_ENGINES`) instead of calling one hardcoded
+analyzer — adding a bug/quality engine later is one line in that list, no
+other change. Doc-drift is triggered by a different webhook event (PR
+merge) than security (open/sync/reopen), so it isn't literally added to
+`_ENGINES` — instead, `analyzers/documentation/engine.py` adapts its
+existing matching+verification output into the same `CandidateFinding`
+schema, and `github/webhooks.py`'s `_handle_pr_merged` now runs that
+through `decision.decide()` (the exact function security uses) before
+posting — this is what "shares the pipeline" means concretely, given the
+two engines fire at genuinely different points in a PR's lifecycle.
+
+**The real design problem, and how it was resolved**: `Finding`'s schema
+(`file_path`/`start_line`/`end_line`/`changed_code`) was built for "this
+line of changed code has an issue" — a documentation finding is about a
+*doc section*, has no tracked line numbers (`doc_sections` never stored
+them), and is triggered *by* a code change without being located *in* it.
+Spec §18 anticipates exactly this with a documentation-specific policy:
+*"Use the existing DriftWatch matching + verification workflow, then pass
+the result through the common validation/reporting pipeline."* Concretely:
+- `Finding.file_path` = the doc file (`README.md`, etc.), not the code
+  that triggered the check.
+- `start_line`/`end_line` = a documented placeholder `1`/`1` — not
+  fabricated data, an acknowledged gap (no real line numbers exist to
+  report).
+- `changed_code` = the stale doc section's content (closest semantic fit;
+  no new field added for one engine).
+- `confidence`/`validation_score` = the embedding similarity score — a
+  real, already-computed number.
+- New `validate_documentation()` (`validation/validator.py`, dispatched by
+  category) is a pass-through: `status="accepted"` always, since a
+  candidate only exists after doc-drift's own similarity-threshold +
+  LLM-verdict gate already ran. This is spec §18's policy, not a weaker
+  check than security's.
+- `deduplication.py`'s dedup key became category-aware: line-overlap for
+  code findings, exact title match for documentation (since every
+  documentation finding in a PR shares the placeholder `1`/`1` range —
+  line-overlap alone would have wrongly collapsed all of them into one).
+
+**Confirmed with the user before implementing**: the doc-drift comment
+format itself changes to the shared Issue/Evidence/Suggested-fix/
+Validation layout (more structured than before — explicit evidence
+bullets, a validation score — same information, not less), replacing the
+custom `format_drift_comment`/`analyzers/documentation/formatting.py`
+(deleted, dead code once its only caller was rewritten). This is a real,
+user-visible change to the project's oldest, longest-stable live behavior,
+made deliberately rather than silently.
+
+**Verified:** `pytest tests/unit tests/integration -v` → 105 passed (13
+new: engine dispatch, `validate_documentation`, category-aware dedup, and
+an end-to-end simulated merged-PR test through the new shared path,
+GitHub/Gemini mocked). Confirmed the two prerequisite refactors
+(`SecurityEngine` wrapper, engine-list loop in `analyze_and_decide`) are
+behavior-preserving: full suite passed unchanged before the doc-drift
+rewrite was made. Re-ran `python -m driftwatch.cli.evaluate` for real
+after the refactor — same pipeline, same result shape, confirming
+evaluation and the live security path still share one code path.
+`main.py` imports cleanly against the real `.env`.
+
+**Not yet done**: a live test against a real merged PR (find_stale_sections
++ draft_update running for real, posting through the new shared
+formatter). Not marking this phase fully signed off until that happens,
+given the blast radius of rewriting `_handle_pr_merged`.
 
 ## Mandatory engineering rules (spec §42, condensed)
 

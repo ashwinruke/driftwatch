@@ -123,7 +123,7 @@ Expose it for GitHub's webhook (dev only):
 
 The bot is being expanded into a modular AI code reviewer; see
 `docs/roadmap.md` and `driftwatch_ai_code_reviewer_agent_spec.md` for the
-full plan and phase status. As of Phase 3, the code lives under `driftwatch/`:
+full plan and phase status. As of Phase 4, the code lives under `driftwatch/`:
 
 | File | Purpose |
 |------|---------|
@@ -137,11 +137,12 @@ full plan and phase status. As of Phase 3, the code lives under `driftwatch/`:
 | driftwatch/github/comments.py | Posts a PR-level comment or a line-anchored review comment |
 | driftwatch/ast/parser.py | tree-sitter chunk extraction, module-level fallback, line-anchoring, import/context extraction |
 | driftwatch/review/context.py | Fetches PR diffs and extracts changed code chunks |
+| driftwatch/review/engine.py | ReviewEngine protocol + ReviewContext (shared by security and, conceptually, documentation) |
 | driftwatch/review/models.py | CandidateFinding / Finding / Evidence schema |
-| driftwatch/review/decision.py | Phase 1: confidence-floor filter (Phase 2 will add real validation here) |
-| driftwatch/review/orchestrator.py | Security-review pipeline: context → engine → decision → reporting |
-| driftwatch/analyzers/documentation/ | The doc-drift engine: indexer, matcher, drafter, formatting |
-| driftwatch/analyzers/security.py | The security-review engine: prompt + LLM call |
+| driftwatch/review/decision.py | Runs each candidate through the validation layer, then dedup |
+| driftwatch/review/orchestrator.py | Security-review pipeline: context → engines → decision → reporting |
+| driftwatch/analyzers/documentation/ | The doc-drift engine: indexer, matcher, drafter (unchanged) + engine.py (adapts a verdict into a CandidateFinding) |
+| driftwatch/analyzers/security.py | The security-review engine: prompt + LLM call + the SecurityEngine wrapper |
 | driftwatch/llm/embeddings.py | Gemini embedding wrapper (doc-drift) |
 | driftwatch/llm/provider.py | LLMProvider protocol + GeminiProvider (structured JSON output) |
 | driftwatch/static_analysis/ | Offline Semgrep + Bandit adapters, run once per PR |

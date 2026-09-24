@@ -48,3 +48,21 @@ def test_different_file_not_deduplicated_even_if_lines_overlap():
     b = _finding(id="b", file_path="other.py", start_line=10, end_line=12)
     result = deduplicate([(a, {}), (b, {})])
     assert {r[0].id for r in result} == {"a", "b"}
+
+
+def test_documentation_findings_with_same_title_are_collapsed():
+    # Both share the placeholder start_line=end_line=1 (doc_sections has no
+    # real line numbers), so line-overlap alone would wrongly merge every
+    # documentation finding in a file -- title is the dedup key instead.
+    a = _finding(id="a", category="documentation", start_line=1, end_line=1, title="Usage", validation_score=0.6)
+    b = _finding(id="b", category="documentation", start_line=1, end_line=1, title="Usage", validation_score=0.9)
+    result = deduplicate([(a, {}), (b, {})])
+    assert len(result) == 1
+    assert result[0][0].id == "b"
+
+
+def test_documentation_findings_with_different_titles_are_kept_separate():
+    a = _finding(id="a", category="documentation", start_line=1, end_line=1, title="Usage")
+    b = _finding(id="b", category="documentation", start_line=1, end_line=1, title="Installation")
+    result = deduplicate([(a, {}), (b, {})])
+    assert {r[0].id for r in result} == {"a", "b"}

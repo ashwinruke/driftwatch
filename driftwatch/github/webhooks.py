@@ -5,16 +5,14 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from driftwatch.analyzers.documentation import (
-    draft_update,
-    find_stale_sections,
-    format_drift_comment,
-    index_specific_files,
-)
+from driftwatch.analyzers.documentation import analyze_chunk, index_specific_files
 from driftwatch.app import config
 from driftwatch.github.auth import get_installation_token
 from driftwatch.github.comments import post_pr_comment
+from driftwatch.reporting.comment_formatter import format_finding_comment
+from driftwatch.reporting.pr_summary import format_pr_summary
 from driftwatch.retry import with_retry
+from driftwatch.review import decision
 from driftwatch.review.context import extract_changed_chunks
 from driftwatch.review.orchestrator import review_pull_request
 
@@ -63,45 +61,54 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
 
 
 def _handle_pr_merged(payload: dict):
+    """Documentation-drift review for a merged PR. Shares the CandidateFinding
+    schema, decision.decide() (validation + dedup), and the reporting
+    formatters with the security pipeline (review.orchestrator) -- see
+    analyzers.documentation.engine and validation.validator.validate_documentation
+    for how a documentation finding fits schema built for code findings."""
     pr = payload["pull_request"]
     owner = payload["repository"]["owner"]["login"]
     repo = payload["repository"]["name"]
     repo_full = payload["repository"]["full_name"]
-    logger.info(f"Merged PR #{pr['number']} in {repo_full}: {pr['title']}")
+    pr_number = pr["number"]
+    logger.info(f"Merged PR #{pr_number} in {repo_full}: {pr['title']}")
 
     try:
         token = get_installation_token(config.GITHUB_APP_ID, config.GITHUB_INSTALLATION_ID)
-        chunks = extract_changed_chunks(owner, repo, pr["number"], token)
+        chunks = extract_changed_chunks(owner, repo, pr_number, token)
 
         if not chunks:
-            logger.info(f"No relevant code changes found in PR #{pr['number']} (no .py files changed, or no function/class-level changes detected)")
+            logger.info(f"No relevant code changes found in PR #{pr_number} (no .py files changed, or no function/class-level changes detected)")
 
-        comments_posted = 0
-
+        candidates: list[tuple] = []
         for chunk in chunks:
-            if comments_posted >= config.MAX_COMMENTS_PER_PR:
-                logger.info(f"Reached comment cap ({config.MAX_COMMENTS_PER_PR}) for PR #{pr['number']}, skipping remaining chunks")
+            logger.info(f"Changed {chunk['type']} '{chunk['name']}' in {chunk['file']} (lines {chunk['start_line']}-{chunk['end_line']})")
+            candidates.extend(analyze_chunk(chunk, repo_full))
+
+        decided = decision.decide(candidates, repo_full, pr_number)
+
+        posted_findings = []
+        for finding, _ in decided:
+            if finding.validation_status != "accepted":
+                logger.info(f"Not posting '{finding.title}': {finding.validation_status} (score={finding.validation_score})")
+                continue
+            if len(posted_findings) >= config.MAX_COMMENTS_PER_PR:
+                logger.info(f"Reached comment cap ({config.MAX_COMMENTS_PER_PR}) for PR #{pr_number}, skipping remaining findings")
                 break
 
-            logger.info(f"Changed {chunk['type']} '{chunk['name']}' in {chunk['file']} (lines {chunk['start_line']}-{chunk['end_line']})")
-            stale_sections = find_stale_sections(repo_full, chunk)
+            comment_body = format_finding_comment(finding)
+            with_retry(post_pr_comment, owner, repo, pr_number, token, comment_body)
+            posted_findings.append(finding)
+            logger.info(f"Posted comment for '{finding.title}' ({len(posted_findings)}/{config.MAX_COMMENTS_PER_PR})")
 
-            for section in stale_sections:
-                if comments_posted >= config.MAX_COMMENTS_PER_PR:
-                    break
-
-                logger.info(f"  -> Checking drift for '{section['heading']}' ({section['file_path']}) score={section['similarity']}")
-                result = with_retry(draft_update, chunk, section)
-                logger.info(f"     Verdict: {result['verdict']} | {result['reason']}")
-
-                if result["verdict"] == "OUTDATED":
-                    comment_body = format_drift_comment(chunk, section, result)
-                    with_retry(post_pr_comment, owner, repo, pr["number"], token, comment_body)
-                    comments_posted += 1
-                    logger.info(f"     Posted PR comment for '{section['heading']}' ({comments_posted}/{config.MAX_COMMENTS_PER_PR})")
+        if candidates:
+            candidate_findings = [candidate for candidate, _ in candidates]
+            all_decided_findings = [finding for finding, _ in decided]
+            summary = format_pr_summary(len(chunks), candidate_findings, all_decided_findings, posted_findings)
+            with_retry(post_pr_comment, owner, repo, pr_number, token, summary)
 
     except Exception:
-        logger.exception(f"Failed processing PR #{pr['number']}")
+        logger.exception(f"Failed processing PR #{pr_number}")
 
 
 def _handle_push(payload: dict):

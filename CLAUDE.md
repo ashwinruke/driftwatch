@@ -20,19 +20,18 @@ review engines behind a validation layer, plus eventually a dashboard), per
 `docs/roadmap.md` for the condensed phased plan, current-file→target-module
 mapping, and phase status.
 
-**Phases 0-3 are done** (refactor, security review MVP, validation layer,
-evaluation) — the flat-file layout is now the `driftwatch/` package
-described below, a security review engine runs on
-`opened`/`synchronize`/`reopened` PR events alongside the untouched,
-merge-triggered doc-drift pipeline, and every posted finding is now
-evidence-grounded (syntactic location/diff checks + real offline
-Semgrep/Bandit corroboration + scoring) before it's allowed to post — see
-the security review pipeline below. `python -m driftwatch.cli.evaluate`
-produces a real metrics report (`evaluation/results/latest.{md,json}`,
-committed) quantifying validation's effect on a 10-fixture local set. Bug/
-quality engines, persistence, Langfuse, and the dashboard don't exist yet.
-Don't jump ahead to later phases without checking `docs/roadmap.md` for
-current status first.
+**Phases 0-4 are done** (refactor, security review MVP, validation layer,
+evaluation, documentation-drift integration) — the flat-file layout is now
+the `driftwatch/` package described below, a security review engine runs
+on `opened`/`synchronize`/`reopened` PR events, and every posted finding
+(security *and*, as of Phase 4, documentation) is evidence-grounded and
+flows through the same `CandidateFinding`/`decision.decide()`/reporting
+pipeline before it's allowed to post — see the two pipelines below.
+`python -m driftwatch.cli.evaluate` produces a real metrics report
+(`evaluation/results/latest.{md,json}`, committed) quantifying validation's
+effect on a 10-fixture local set. Bug/quality engines, persistence,
+Langfuse, and the dashboard don't exist yet. Don't jump ahead to later
+phases without checking `docs/roadmap.md` for current status first.
 
 Mandatory rules for any future work here (spec §42, applies to every
 phase): inspect before modifying and don't assume the repo matches the spec
@@ -137,15 +136,21 @@ driftwatch/
 │   ├── context.py            # diff fetching + chunk-extraction glue (uses ast/ + github/).
 │   │                         # extract_chunks_from_source() is the GitHub-independent
 │   │                         # per-file core, reused directly by cli/evaluate.py
-│   ├── models.py               # CandidateFinding / Finding / Evidence / StaticMatch models
-│   ├── decision.py              # runs each candidate through validation.validator.validate()
-│   └── orchestrator.py           # security-review pipeline: context -> static analysis ->
-│                                 # engine -> decision -> reporting. analyze_and_decide() is
-│                                 # the GitHub-independent core (chunks -> candidates+decided),
-│                                 # also reused directly by cli/evaluate.py
+│   ├── engine.py               # ReviewEngine Protocol + ReviewContext dataclass (spec §14)
+│   ├── models.py                 # CandidateFinding / Finding / Evidence / StaticMatch models
+│   ├── decision.py                 # runs each candidate through validation.validator.validate()
+│   └── orchestrator.py               # security-review pipeline: context -> static analysis ->
+│                                     # engines (currently just [SecurityEngine]) -> decision ->
+│                                     # reporting. analyze_and_decide() is the GitHub-independent
+│                                     # core (chunks -> candidates+decided), also reused directly
+│                                     # by cli/evaluate.py
 ├── analyzers/
-│   ├── documentation/        # the doc-drift engine: indexer, matcher, drafter, formatting
-│   └── security.py            # the security engine: prompt + LLM call
+│   ├── documentation/        # the doc-drift engine: indexer, matcher, drafter (all unchanged
+│   │                         # since before Phase 4) + engine.py (new: adapts an OUTDATED
+│   │                         # verdict into a CandidateFinding, per spec §18's documentation
+│   │                         # policy -- see the PR-merge pipeline below)
+│   └── security.py            # the security engine: prompt + LLM call + SecurityEngine
+│                              # (the ReviewEngine wrapper orchestrator.py actually calls)
 ├── llm/
 │   ├── embeddings.py          # Gemini embedding wrapper (doc-drift)
 │   └── provider.py             # LLMProvider protocol + GeminiProvider (structured JSON output)
@@ -156,11 +161,15 @@ driftwatch/
 │   ├── executables.py           # resolves the semgrep/bandit executables via sys.executable
 │   └── runner.py                 # runs both tools once per PR, remaps line numbers to chunks
 ├── validation/
-│   ├── evidence.py            # location + diff-relevance + AST-context checks
-│   ├── rules.py                 # overstated-certainty wording heuristic
+│   ├── evidence.py            # location + diff-relevance + AST-context checks (security only)
+│   ├── rules.py                 # overstated-certainty wording heuristic (security only)
 │   ├── scoring.py                 # ValidationResult + compute_score() + decide_status()
-│   ├── deduplication.py             # collapses overlapping same-file/category findings
-│   └── validator.py                  # validate(candidate, chunk) -> ValidationResult
+│   ├── deduplication.py             # collapses same underlying issue: line-overlap for
+│   │                                # code findings, exact title match for documentation
+│   │                                # (which shares a placeholder line range)
+│   └── validator.py                  # validate(candidate, chunk) dispatches on category:
+│                                      # validate_security() (the checks above) or
+│                                      # validate_documentation() (pass-through, spec §18)
 ├── reporting/
 │   ├── comment_formatter.py    # inline-finding markdown (security/bug/quality findings)
 │   └── pr_summary.py            # PR-level summary markdown
@@ -183,7 +192,11 @@ Three independent webhook-triggered pipelines share one FastAPI router
 (`driftwatch/github/webhooks.py`), all gated by HMAC signature verification
 (`verify_signature`) against `GITHUB_WEBHOOK_SECRET`:
 
-**1. PR-merge drift detection** (`pull_request` / closed+merged events):
+**1. PR-merge drift detection** (`pull_request` / closed+merged events).
+As of Phase 4, shares the same `CandidateFinding`/`decision.decide()`
+(validation + dedup)/reporting pipeline the security review (§3 below)
+uses — see `docs/roadmap.md`'s Phase 4 report for why a doc finding fits a
+schema built for code findings:
 ```
 review.context.extract_changed_chunks    -- fetch PR file diffs, parse hunk headers
                                             to find changed line ranges (ast.parser
@@ -192,17 +205,36 @@ review.context.extract_changed_chunks    -- fetch PR file diffs, parse hunk head
                                             enclosing function/class definitions that
                                             overlap those ranges (not raw diff lines)
         |
-analyzers.documentation.find_stale_sections  -- embed the changed chunk (Gemini), cosine
-                                            similarity search against doc_sections
-                                            (pgvector), keep results >= SIMILARITY_THRESHOLD
+analyzers.documentation.engine.analyze_chunk  -- UNCHANGED matching + verification:
+                                            find_stale_sections embeds the changed chunk
+                                            (Gemini), cosine similarity search against
+                                            doc_sections (pgvector, >= SIMILARITY_THRESHOLD),
+                                            then draft_update (Gemini 2.5 Flash) verifies
+                                            each match is a real behavioral drift and drafts
+                                            a replacement section. NEW: wraps every OUTDATED
+                                            verdict into a CandidateFinding(category=
+                                            "documentation", file_path=<doc file>,
+                                            start_line=end_line=1 [placeholder -- doc_sections
+                                            has no real line numbers], confidence=similarity)
         |
-analyzers.documentation.draft_update      -- Gemini 2.5 Flash verifies the match is a real
-                                            behavioral drift (not just topical similarity)
-                                            and drafts a replacement for that section only
+review.decision.decide -> validation.validator.validate_documentation
+                                           -- per spec §18: the existing matching+verification
+                                             above already IS the evidence, so this is a
+                                             pass-through (always "accepted", score =
+                                             similarity) -- NOT the code-specific checks
+                                             validate_security uses (location-in-chunk,
+                                             diff-overlap, static corroboration all assume
+                                             a code chunk, which doesn't apply to a doc
+                                             finding). validation.deduplication dedupes by
+                                             exact title match for this category (not line
+                                             overlap, since all doc findings share the
+                                             placeholder 1/1 range)
         |
-github.comments.post_pr_comment           -- posts if verdict == OUTDATED, capped at
-                                            MAX_COMMENTS_PER_PR (default 3) per PR via a
-                                            comments_posted counter in webhooks.py
+github.comments.post_pr_comment           -- ONLY "accepted" findings get posted via the
+                                            SAME format_finding_comment() security uses,
+                                            capped at MAX_COMMENTS_PER_PR, then one PR
+                                            summary via format_pr_summary() (same function,
+                                            already generic over category)
 ```
 `draft_update` and `post_pr_comment` are both called through
 `retry.with_retry` (exponential backoff, 3 attempts) since both hit external
@@ -361,6 +393,19 @@ authority; only `validate()`'s output decides what gets posted.
   treats missing corroboration as one lower-weighted signal among several,
   not a veto — a finding can still be `accepted` on strong diff/AST
   evidence plus high LLM confidence alone if it clears the threshold.
+- **`Finding`'s schema is code-location-centric; documentation findings
+  are fit into it, not perfectly modeled by it.** `analyzers/documentation
+  /engine.py` sets `file_path` to the *doc* file (not the code that
+  triggered the check), `start_line`/`end_line` to a placeholder `1`/`1`
+  (`doc_sections` tracks no real line numbers), and `changed_code` to the
+  stale doc section's content. `validate_documentation()` in
+  `validation/validator.py` knows not to check these against the
+  triggering code chunk's bounds the way `validate_security()` does for
+  every other category — see `docs/roadmap.md`'s Phase 4 report for the
+  full reasoning. This is why `deduplication.py` dedupes documentation
+  findings by exact title match instead of line overlap: every
+  documentation finding in a PR shares the same `1`/`1` range, so
+  line-overlap would incorrectly collapse all of them into one.
 - **LLM fallback** (`llm/provider.py`): `FallbackProvider` is provider-agnostic
   by design — it only knows both providers implement `generate_findings(prompt)
   -> list[CandidateFinding]`, and retries via the fallback on *any* exception
@@ -418,3 +463,11 @@ authority; only `validate()`'s output decides what gets posted.
   key-shaped content in `GITHUB_PRIVATE_KEY_PATH` with a clean error), key
   rotated, Render env var corrected. See `docs/roadmap.md`'s Phase 1 report
   for the full writeup.
+- **Doc-drift's posted comment format changed in Phase 4** — from a custom
+  "Possible documentation drift detected" layout to the same shared
+  Issue/Evidence/Suggested-fix/Validation layout security findings use
+  (`analyzers/documentation/formatting.py`/`format_drift_comment` were
+  deleted, superseded by `reporting/comment_formatter.py`). Confirmed with
+  the user before making the change, since it altered the project's
+  oldest, longest-stable live behavior — see `docs/roadmap.md`'s Phase 4
+  report.

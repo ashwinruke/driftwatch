@@ -1,15 +1,15 @@
 {
-  "timestamp": "2026-09-23T07:49:16.374479+00:00",
+  "timestamp": "2026-09-24T05:59:44.735257+00:00",
   "fixture_count": 10,
   "before_validation": {
     "tp": 4,
-    "fp": 1,
+    "fp": 0,
     "fn": 0,
-    "tn": 5,
-    "precision": 0.8,
+    "tn": 6,
+    "precision": 1.0,
     "recall": 1.0,
-    "f1": 0.889,
-    "false_positive_rate": 0.167
+    "f1": 1.0,
+    "false_positive_rate": 0.0
   },
   "after_validation": {
     "tp": 4,
@@ -21,16 +21,16 @@
     "f1": 1.0,
     "false_positive_rate": 0.0
   },
-  "total_candidates": 6,
-  "total_accepted": 5,
+  "total_candidates": 4,
+  "total_accepted": 4,
   "total_rejected": 0,
-  "total_needs_review": 1,
-  "validation_acceptance_rate": 0.833,
+  "total_needs_review": 0,
+  "validation_acceptance_rate": 1.0,
   "rejected_rate": 0.0,
   "static_analysis_agreement_rate": 1.0,
-  "average_findings_per_fixture": 0.5,
-  "average_latency_seconds": 14.489,
-  "median_latency_seconds": 13.683,
+  "average_findings_per_fixture": 0.4,
+  "average_latency_seconds": 14.096,
+  "median_latency_seconds": 14.16,
   "known_limitations": [
     "Evaluation is fixture-level (per-fixture pass/fail), not per-line, since exact LLM-reported line numbers aren't reproducible run to run.",
     "Token/cost-per-review tracking is not implemented.",
@@ -46,7 +46,7 @@
       "rejected_count": 0,
       "needs_review_count": 0,
       "static_corroborated_count": 1,
-      "latency_seconds": 15.052
+      "latency_seconds": 14.023
     },
     {
       "fixture": "shell_injection",
@@ -56,17 +56,17 @@
       "rejected_count": 0,
       "needs_review_count": 0,
       "static_corroborated_count": 1,
-      "latency_seconds": 15.508
+      "latency_seconds": 14.881
     },
     {
       "fixture": "hardcoded_secret",
       "expected": true,
-      "candidate_count": 2,
-      "accepted_count": 2,
+      "candidate_count": 1,
+      "accepted_count": 1,
       "rejected_count": 0,
       "needs_review_count": 0,
-      "static_corroborated_count": 2,
-      "latency_seconds": 24.292
+      "static_corroborated_count": 1,
+      "latency_seconds": 15.113
     },
     {
       "fixture": "unsafe_eval",
@@ -76,7 +76,7 @@
       "rejected_count": 0,
       "needs_review_count": 0,
       "static_corroborated_count": 1,
-      "latency_seconds": 25.508
+      "latency_seconds": 13.071
     },
     {
       "fixture": "safe_parameterized_sql",
@@ -86,7 +86,7 @@
       "rejected_count": 0,
       "needs_review_count": 0,
       "static_corroborated_count": 0,
-      "latency_seconds": 7.392
+      "latency_seconds": 12.342
     },
     {
       "fixture": "safe_subprocess",
@@ -96,7 +96,7 @@
       "rejected_count": 0,
       "needs_review_count": 0,
       "static_corroborated_count": 0,
-      "latency_seconds": 10.249
+      "latency_seconds": 14.266
     },
     {
       "fixture": "config_constant_not_secret",
@@ -106,17 +106,17 @@
       "rejected_count": 0,
       "needs_review_count": 0,
       "static_corroborated_count": 0,
-      "latency_seconds": 10.591
+      "latency_seconds": 14.054
     },
     {
       "fixture": "password_param_safe_use",
       "expected": false,
-      "candidate_count": 1,
+      "candidate_count": 0,
       "accepted_count": 0,
       "rejected_count": 0,
-      "needs_review_count": 1,
+      "needs_review_count": 0,
       "static_corroborated_count": 0,
-      "latency_seconds": 17.587
+      "latency_seconds": 14.748
     },
     {
       "fixture": "comment_only_change",
@@ -126,7 +126,7 @@
       "rejected_count": 0,
       "needs_review_count": 0,
       "static_corroborated_count": 0,
-      "latency_seconds": 6.394
+      "latency_seconds": 12.266
     },
     {
       "fixture": "harmless_refactor",
@@ -136,7 +136,7 @@
       "rejected_count": 0,
       "needs_review_count": 0,
       "static_corroborated_count": 0,
-      "latency_seconds": 12.315
+      "latency_seconds": 16.202
     }
   ]
 }
