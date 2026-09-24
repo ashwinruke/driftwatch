@@ -1,0 +1,10 @@
+{"fixture": "sql_injection", "file": "sql_injection.py", "category": "security", "expected": true, "expected_issue": "SQL injection via f-string interpolation into cursor.execute"}
+{"fixture": "shell_injection", "file": "shell_injection.py", "category": "security", "expected": true, "expected_issue": "command injection via subprocess.run(..., shell=True)"}
+{"fixture": "hardcoded_secret", "file": "hardcoded_secret.py", "category": "security", "expected": true, "expected_issue": "hardcoded API key as a module-level string literal"}
+{"fixture": "unsafe_eval", "file": "unsafe_eval.py", "category": "security", "expected": true, "expected_issue": "arbitrary code execution via eval() on unsanitized input"}
+{"fixture": "safe_parameterized_sql", "file": "safe_parameterized_sql.py", "category": "security", "expected": false, "expected_issue": null}
+{"fixture": "safe_subprocess", "file": "safe_subprocess.py", "category": "security", "expected": false, "expected_issue": null}
+{"fixture": "config_constant_not_secret", "file": "config_constant_not_secret.py", "category": "security", "expected": false, "expected_issue": null}
+{"fixture": "password_param_safe_use", "file": "password_param_safe_use.py", "category": "security", "expected": false, "expected_issue": null}
+{"fixture": "comment_only_change", "file": "comment_only_change.py", "category": "security", "expected": false, "expected_issue": null}
+{"fixture": "harmless_refactor", "file": "harmless_refactor.py", "category": "security", "expected": false, "expected_issue": null}

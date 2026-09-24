@@ -20,16 +20,19 @@ review engines behind a validation layer, plus eventually a dashboard), per
 `docs/roadmap.md` for the condensed phased plan, current-file→target-module
 mapping, and phase status.
 
-**Phases 0-2 are done** (refactor, security review MVP, validation layer)
-— the flat-file layout is now the `driftwatch/` package described below, a
-security review engine runs on `opened`/`synchronize`/`reopened` PR events
-alongside the untouched, merge-triggered doc-drift pipeline, and every
-posted finding is now evidence-grounded (syntactic location/diff checks +
-real offline Semgrep/Bandit corroboration + scoring) before it's allowed to
-post — see the security review pipeline below. Bug/quality engines,
-persistence, evaluation, and the dashboard don't exist yet. Don't jump
-ahead to later phases without checking `docs/roadmap.md` for current
-status first.
+**Phases 0-3 are done** (refactor, security review MVP, validation layer,
+evaluation) — the flat-file layout is now the `driftwatch/` package
+described below, a security review engine runs on
+`opened`/`synchronize`/`reopened` PR events alongside the untouched,
+merge-triggered doc-drift pipeline, and every posted finding is now
+evidence-grounded (syntactic location/diff checks + real offline
+Semgrep/Bandit corroboration + scoring) before it's allowed to post — see
+the security review pipeline below. `python -m driftwatch.cli.evaluate`
+produces a real metrics report (`evaluation/results/latest.{md,json}`,
+committed) quantifying validation's effect on a 10-fixture local set. Bug/
+quality engines, persistence, Langfuse, and the dashboard don't exist yet.
+Don't jump ahead to later phases without checking `docs/roadmap.md` for
+current status first.
 
 Mandatory rules for any future work here (spec §42, applies to every
 phase): inspect before modifying and don't assume the repo matches the spec
@@ -65,6 +68,14 @@ Build the initial doc index for a repo (one-off; edit the owner/repo args in
 ```
 python index_now.py
 ```
+
+Run the evaluation suite (needs real `GEMINI_API_KEY`/`GROQ_API_KEY` — it
+measures the real pipeline, so it's not part of `pytest`):
+```
+python -m driftwatch.cli.evaluate
+```
+Writes `evaluation/results/latest.{md,json}` (committed) and a timestamped
+copy under `evaluation/results/runs/` (gitignored, local history only).
 
 Run the test suite:
 ```
@@ -123,11 +134,15 @@ driftwatch/
 │   └── comments.py           # post_pr_comment (PR-level) + post_review_comment (line-anchored)
 ├── ast/parser.py            # generic tree-sitter chunk extraction + line-range helpers
 ├── review/
-│   ├── context.py            # diff fetching + chunk-extraction glue (uses ast/ + github/)
+│   ├── context.py            # diff fetching + chunk-extraction glue (uses ast/ + github/).
+│   │                         # extract_chunks_from_source() is the GitHub-independent
+│   │                         # per-file core, reused directly by cli/evaluate.py
 │   ├── models.py               # CandidateFinding / Finding / Evidence / StaticMatch models
 │   ├── decision.py              # runs each candidate through validation.validator.validate()
 │   └── orchestrator.py           # security-review pipeline: context -> static analysis ->
-│                                 # engine -> decision -> reporting
+│                                 # engine -> decision -> reporting. analyze_and_decide() is
+│                                 # the GitHub-independent core (chunks -> candidates+decided),
+│                                 # also reused directly by cli/evaluate.py
 ├── analyzers/
 │   ├── documentation/        # the doc-drift engine: indexer, matcher, drafter, formatting
 │   └── security.py            # the security engine: prompt + LLM call
@@ -150,8 +165,19 @@ driftwatch/
 │   ├── comment_formatter.py    # inline-finding markdown (security/bug/quality findings)
 │   └── pr_summary.py            # PR-level summary markdown
 ├── persistence/db.py        # PostgreSQL/pgvector connection + schema
-└── retry.py                  # retry-with-backoff wrapper
+├── retry.py                  # retry-with-backoff wrapper
+└── cli/evaluate.py          # `python -m driftwatch.cli.evaluate` -- runs the security
+                              # pipeline against evaluation/fixtures/, reusing
+                              # extract_chunks_from_source + analyze_and_decide (the
+                              # exact same code the live webhook path uses), and writes
+                              # evaluation/results/latest.{md,json}
 ```
+
+`evaluation/` (repo root, not under `driftwatch/`) holds the fixture set:
+`fixtures/*.py` (small, purpose-built files, not real PR diffs — see
+`docs/roadmap.md`'s Phase 3 section for why), `expected_findings.jsonl`
+(ground truth, one line per fixture), and `results/` (`latest.{md,json}`
+committed, `runs/<timestamp>.json` gitignored history).
 
 Three independent webhook-triggered pipelines share one FastAPI router
 (`driftwatch/github/webhooks.py`), all gated by HMAC signature verification

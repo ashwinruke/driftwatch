@@ -19,6 +19,21 @@ logger = logging.getLogger("driftwatch")
 _provider = FallbackProvider(GeminiProvider(), GroqProvider()) if config.GROQ_API_KEY else GeminiProvider()
 
 
+def analyze_and_decide(chunks: list[dict], repository: str, pr_title: str, pr_body: str, pr_number: int):
+    """Runs the security engine over every chunk, then validates the
+    results. Shared by the live webhook path (review_pull_request) and
+    driftwatch.cli.evaluate, so evaluation measures the exact same code
+    path production uses -- callers are responsible for having already run
+    static analysis on the chunks (chunk["static_matches"]) beforehand."""
+    candidates: list[tuple] = []
+    for chunk in chunks:
+        findings = security.analyze(chunk, repository, pr_title, pr_body, _provider)
+        candidates.extend((finding, chunk) for finding in findings)
+
+    decided = decision.decide(candidates, repository, pr_number)
+    return candidates, decided
+
+
 def review_pull_request(payload: dict):
     """Security review for an opened/synchronize/reopened PR. Separate from
     (and untouched by) doc-drift's merge-triggered pipeline."""
@@ -36,16 +51,11 @@ def review_pull_request(payload: dict):
         chunks = extract_changed_chunks(owner, repo, pr_number, token, include_module_level=True)
         run_static_analysis(chunks)  # attaches chunk["static_matches"] in place, once for the whole PR
 
-        candidates: list[tuple] = []
-        for chunk in chunks:
-            findings = security.analyze(chunk, repo_full, pr["title"], pr.get("body") or "", _provider)
-            candidates.extend((finding, chunk) for finding in findings)
-
-        decided = decision.decide(candidates, repo_full, pr_number)
+        candidates, decided = analyze_and_decide(chunks, repo_full, pr["title"], pr.get("body") or "", pr_number)
 
         # Only "accepted" findings get posted (spec §19's publish rule).
         # "needs_review"/"rejected" are logged for visibility but not
-        # persisted yet -- that's Phase 3's review_runs/findings schema.
+        # persisted anywhere yet -- no review_runs/findings schema exists.
         accepted = [(finding, chunk) for finding, chunk in decided if finding.validation_status == "accepted"]
         for finding, _ in decided:
             if finding.validation_status != "accepted":

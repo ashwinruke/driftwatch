@@ -24,6 +24,37 @@ def get_blob_content(owner: str, repo: str, blob_sha: str, token: str) -> bytes:
     return base64.b64decode(resp.json()["content"])
 
 
+def extract_chunks_from_source(
+    source_bytes: bytes,
+    path: str,
+    changed_ranges: list[tuple[int, int]],
+    include_module_level: bool = False,
+) -> list[dict]:
+    """The per-file chunk-building logic, independent of GitHub -- given a
+    file's full content and which of its line ranges changed, produces the
+    same chunk shape extract_changed_chunks does. Used by the live PR path
+    (one file fetched at a time) and by driftwatch.cli.evaluate (a whole
+    local fixture file, treated as one fully-changed "file"), so evaluation
+    exercises the exact same chunking the live pipeline does."""
+    chunks = find_enclosing_chunks(source_bytes, changed_ranges)
+
+    if include_module_level:
+        uncovered = find_uncovered_ranges(changed_ranges, chunks)
+        chunks = chunks + extract_module_level_chunks(source_bytes, uncovered)
+
+    for chunk in chunks:
+        chunk["file"] = path
+        if include_module_level:
+            chunk["anchor_line"] = find_anchor_line(chunk["start_line"], chunk["end_line"], changed_ranges)
+            chunk["diff_ranges"] = changed_ranges
+            chunk["imports"] = extract_imports(source_bytes)
+            context_before, context_after = extract_surrounding_lines(source_bytes, chunk["start_line"], chunk["end_line"])
+            chunk["context_before"] = context_before
+            chunk["context_after"] = context_after
+
+    return chunks
+
+
 def extract_changed_chunks(owner: str, repo: str, pr_number: int, token: str, include_module_level: bool = False):
     """include_module_level=True additionally:
     - emits a pseudo-chunk for changed lines not covered by any
@@ -58,22 +89,7 @@ def extract_changed_chunks(owner: str, repo: str, pr_number: int, token: str, in
             continue
 
         source_bytes = get_blob_content(owner, repo, f["sha"], token)
-        chunks = find_enclosing_chunks(source_bytes, ranges)
-
-        if include_module_level:
-            uncovered = find_uncovered_ranges(ranges, chunks)
-            chunks = chunks + extract_module_level_chunks(source_bytes, uncovered)
-
-        for chunk in chunks:
-            chunk["file"] = path
-            if include_module_level:
-                chunk["anchor_line"] = find_anchor_line(chunk["start_line"], chunk["end_line"], ranges)
-                chunk["diff_ranges"] = ranges
-                chunk["imports"] = extract_imports(source_bytes)
-                context_before, context_after = extract_surrounding_lines(source_bytes, chunk["start_line"], chunk["end_line"])
-                chunk["context_before"] = context_before
-                chunk["context_after"] = context_after
-            results.append(chunk)
+        results.extend(extract_chunks_from_source(source_bytes, path, ranges, include_module_level))
 
     logger.info(f"PR #{pr_number}: {len(results)} chunk(s) extracted for analysis")
     return results

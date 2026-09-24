@@ -123,7 +123,7 @@ Expose it for GitHub's webhook (dev only):
 
 The bot is being expanded into a modular AI code reviewer; see
 `docs/roadmap.md` and `driftwatch_ai_code_reviewer_agent_spec.md` for the
-full plan and phase status. As of Phase 2, the code lives under `driftwatch/`:
+full plan and phase status. As of Phase 3, the code lives under `driftwatch/`:
 
 | File | Purpose |
 |------|---------|
@@ -149,6 +149,8 @@ full plan and phase status. As of Phase 2, the code lives under `driftwatch/`:
 | driftwatch/reporting/ | Inline-finding and PR-summary markdown formatting |
 | driftwatch/persistence/db.py | PostgreSQL/pgvector connection + schema |
 | driftwatch/retry.py | Retry-with-backoff wrapper for transient API failures |
+| driftwatch/cli/evaluate.py | `python -m driftwatch.cli.evaluate` — runs the security pipeline against `evaluation/fixtures/`, reports precision/recall/F1/false-positive rate before vs. after validation |
+| evaluation/ | Local fixtures + ground truth + generated metrics reports (`results/latest.{md,json}`) |
 | tests/unit/, tests/integration/ | pytest coverage — pure logic, plus webhook flows with GitHub/Gemini mocked |
 
 ## Roadmap

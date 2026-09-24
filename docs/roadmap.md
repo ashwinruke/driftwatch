@@ -16,7 +16,7 @@ Documentation drift becomes one review engine among several (security, bugs,
 quality, documentation), all sharing one `ReviewEngine` interface, one
 `Finding`/`Evidence` schema, and one validation/reporting pipeline.
 
-## Status: Phase 0, 1 and 2 done, Phase 3 not started
+## Status: Phase 0, 1, 2 and 3 done, Phase 4 not started
 
 The repository has been reorganized into a `driftwatch/` package (see
 `CLAUDE.md`'s Architecture section for the current, accurate layout), and a
@@ -27,9 +27,12 @@ scoring, deduplication) decides accept/needs_review/reject before anything
 is posted — only `accepted` findings become inline comments. Documentation
 drift is untouched throughout. Phases 1 and 2 are both confirmed live
 end-to-end against a real PR, on top of spec §35's golden test cases
-running through the real pipeline (see the Phase 2 report below). Nothing
-from Phase 3 onward (evaluation framework, bug/quality engines, doc-drift
-integration, dashboard) has been built yet.
+running through the real pipeline. `python -m driftwatch.cli.evaluate` now
+produces a real, checked-in metrics report
+(`evaluation/results/latest.{md,json}`) quantifying validation's actual
+effect — see the Phase 3 report below for the real numbers. Nothing from
+Phase 4 onward (bug/quality engines, doc-drift integration into a shared
+`ReviewEngine`, Langfuse, dashboard) has been built yet.
 
 ## Current baseline → target module mapping
 
@@ -134,7 +137,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 | **0 — Repository assessment & refactor** | Prepare the existing repo: package boundaries, separate GitHub plumbing from the doc-drift engine, add typing/tests | Doc-drift flow still works; new architecture documented; no unnecessary rewrite | **Done** |
 | 1 — GitHub PR review MVP | Webhooks for opened/synchronize/reopened, Python diff/context analysis, LLM provider interface, security engine first, inline comments + PR summary | A seeded vulnerability in a test PR produces one accurate inline finding | **Done — live-verified** |
 | 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases + live-verified** |
-| 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | Not started |
+| 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | **Done — real report generated** |
 | 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | Not started |
 | 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | Not started |
 | 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | Not started |
@@ -322,6 +325,65 @@ None of these were caught by the test suite beforehand, since none of them
 are reachable from mocked GitHub/Gemini calls — a reminder that the local
 suite (deliberately) doesn't substitute for a live pass against the real
 deployment, GitHub App, and external APIs.
+
+## Phase 3 report
+
+Built per the mapping/design in this doc's earlier sections:
+`driftwatch/cli/evaluate.py` (`python -m driftwatch.cli.evaluate`), 10
+local fixtures (`evaluation/fixtures/`) with ground truth
+(`evaluation/expected_findings.jsonl`), and two behavior-preserving
+refactors — `review/context.py`'s `extract_chunks_from_source` and
+`review/orchestrator.py`'s `analyze_and_decide` — that let evaluation
+reuse the exact same chunking/analysis/validation code path production
+uses, not a re-implementation. Both refactors were verified
+behavior-preserving by the full existing test suite passing unchanged
+before any new tests were added.
+
+**Deliberate deviations from spec §21's literal structure**, both
+documented in the plan and worth repeating here since they materially
+shape what these numbers do and don't mean:
+- Local fixture files, not real historical PRs (`repositories/`+`prs/`) —
+  chosen for reproducibility and speed. Phase 5's recruiter demo covers a
+  real PR anyway.
+- Fixture-level scoring (did this fixture produce ≥1 accepted finding, y/n),
+  not spec's implied per-line ground truth — an LLM's exact reported line
+  number isn't perfectly reproducible run to run, so per-line scoring would
+  add noise without adding real signal here.
+
+**Real run, real numbers** (`evaluation/results/latest.md`, generated
+2026-09-23, 10 fixtures: 4 expected a finding, 6 expected clean):
+
+| | Precision | Recall | F1 | False positive rate |
+|---|---:|---:|---:|---:|
+| Before validation (any LLM candidate posted) | 0.80 | 1.00 | 0.89 | 0.17 |
+| After validation (only accepted posted) | 1.00 | 1.00 | 1.00 | 0.00 |
+
+This is the number Phase 2's exit criterion asked for but only demonstrated
+anecdotally at the time (golden-case tests): validation measurably reduced
+the false-positive rate on this fixture set, from 17% to 0%, without
+losing recall. **This is a result on a 10-fixture local set, not a
+general-purpose false-positive-rate claim** — the report itself says so
+explicitly (spec §20's warning against overclaiming), and `latest.md`
+carries the same caveat every time it's regenerated.
+
+The run also exercised the Groq fallback for real, not just in tests:
+Gemini's free-tier quota (5 requests/minute) was hit mid-run, `FallbackProvider`
+switched to Groq automatically, and Groq correctly returned a nuanced
+`needs_review` finding (PBKDF2 iteration count below current recommendation
+in `password_param_safe_use.py`) rather than a false accept or a crash —
+a genuine, unplanned validation of both the fallback and the scoring
+pipeline's handling of borderline cases.
+
+**Known limitations** (in the report itself, not just here):
+token/cost-per-review tracking isn't implemented (would need extending
+`LLMProvider` to expose usage metadata across all three provider classes,
+deferred rather than fabricating a number); only the security engine is
+evaluated, since bug/quality engines don't exist yet.
+
+**Verified:** `pytest tests/unit tests/integration -v` → 92 passed (18 new).
+`python -m driftwatch.cli.evaluate` run for real against live Gemini/Groq
+credentials; `evaluation/results/latest.{md,json}` committed. `main.py`
+still imports cleanly against the real `.env`.
 
 ## Mandatory engineering rules (spec §42, condensed)
 
