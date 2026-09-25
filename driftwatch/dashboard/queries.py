@@ -210,7 +210,14 @@ def get_finding_detail(finding_id: str) -> dict | None:
     conn = get_connection()
     cur = _dict_cursor(conn)
 
-    cur.execute("SELECT * FROM findings WHERE id = %s", (finding_id,))
+    cur.execute(
+        """
+        SELECT f.*, rr.repository_id
+        FROM findings f JOIN review_runs rr ON rr.id = f.review_run_id
+        WHERE f.id = %s
+        """,
+        (finding_id,),
+    )
     finding = cur.fetchone()
     if not finding:
         cur.close()

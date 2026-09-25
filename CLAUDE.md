@@ -20,18 +20,26 @@ review engines behind a validation layer, plus eventually a dashboard), per
 `docs/roadmap.md` for the condensed phased plan, current-file→target-module
 mapping, and phase status.
 
-**Phases 0-4 are done and live-verified** (refactor, security review MVP, validation layer,
-evaluation, documentation-drift integration) — the flat-file layout is now
-the `driftwatch/` package described below, a security review engine runs
-on `opened`/`synchronize`/`reopened` PR events, and every posted finding
-(security *and*, as of Phase 4, documentation) is evidence-grounded and
-flows through the same `CandidateFinding`/`decision.decide()`/reporting
-pipeline before it's allowed to post — see the two pipelines below.
+**Phases 0-5 are done and live-verified** (refactor, security review MVP, validation layer,
+evaluation, documentation-drift integration, observability/CI/CD/recruiter
+polish) — the flat-file layout is now the `driftwatch/` package described
+below, a security review engine runs on `opened`/`synchronize`/`reopened`
+PR events, and every posted finding (security *and*, as of Phase 4,
+documentation) is evidence-grounded and flows through the same
+`CandidateFinding`/`decision.decide()`/reporting pipeline before it's
+allowed to post — see the two pipelines below.
 `python -m driftwatch.cli.evaluate` produces a real metrics report
 (`evaluation/results/latest.{md,json}`, committed) quantifying validation's
-effect on a 10-fixture local set. Bug/quality engines, persistence,
-Langfuse, and the dashboard don't exist yet. Don't jump ahead to later
-phases without checking `docs/roadmap.md` for current status first.
+effect on a 10-fixture local set. **Phase 6 (dashboard) is partially
+done**: every review run is now persisted (`persistence/review_store.py`,
+wired into both pipelines below) and read back through
+`driftwatch/dashboard/`'s API + a separate Next.js app (`dashboard/`,
+repo root) covering the golden path (overview/repositories/review/finding
+pages) — Observability/Evaluation/Analytics pages, dashboard auth, and a
+full review-run state machine are explicit follow-ups (see
+`docs/roadmap.md`'s Phase 6 report). Bug/quality engines still don't
+exist. Don't jump ahead to later phases without checking `docs/roadmap.md`
+for current status first.
 
 Mandatory rules for any future work here (spec §42, applies to every
 phase): inspect before modifying and don't assume the repo matches the spec
@@ -147,6 +155,15 @@ to work; both are invoked as subprocesses, resolved via
 Python's own directory (not `PATH`) so they work whether or not the venv
 was "activated."
 
+Dashboard frontend (`dashboard/`, a separate Next.js/TypeScript app, not
+part of the Python package or its test suite): `cd dashboard && npm
+install && npm run dev` (needs `driftwatch`'s own `uvicorn main:app`
+running separately, with `NEXT_PUBLIC_API_URL` pointed at it — see
+`dashboard/README.md`). `npx tsc --noEmit`, `npm run lint`, `npm run
+build` are its equivalents of `pytest`/`ruff check` — none of these run in
+CI yet (Phase 6's CI integration is part of the deferred dashboard work,
+see `docs/roadmap.md`'s Phase 6 report).
+
 ## Architecture
 
 `main.py` and `db.py` at the repo root are thin shims that exist only so
@@ -205,7 +222,18 @@ driftwatch/
 ├── reporting/
 │   ├── comment_formatter.py    # inline-finding markdown (security/bug/quality findings)
 │   └── pr_summary.py            # PR-level summary markdown
-├── persistence/db.py        # PostgreSQL/pgvector connection + schema
+├── persistence/
+│   ├── db.py                   # PostgreSQL/pgvector connection + schema (doc_sections +
+│   │                           # Phase 6's repositories/review_runs/findings/evidence/
+│   │                           # validation_results/comments/changed_chunks)
+│   └── review_store.py          # writes a review run's data (Phase 6) -- get_or_create_repository,
+│                                # start_review_run, record_changed_chunks, record_findings,
+│                                # record_comment, complete_review_run, all via safe_call()
+│                                # (logs, never raises -- a DB outage must never block a review)
+├── dashboard/                # Phase 6 dashboard read API: schemas.py (Pydantic response
+│   │                         # models), queries.py (read-only SQL), api.py (FastAPI router,
+│   │                         # mounted in main.py at /api/v1/*) -- consumed by the separate
+│   │                         # dashboard/ Next.js app (repo root, not under driftwatch/)
 ├── observability/tracing.py  # optional Langfuse tracing: traced_span/traced_generation
 │                             # decorators + tag_current_run() -- identity/no-op when
 │                             # LANGFUSE_PUBLIC_KEY isn't set (see Architecture below)
@@ -355,6 +383,30 @@ authority; only `validate()`'s output decides what gets posted.
 
 ## Key implementation details
 
+- **Dashboard persistence** (`persistence/review_store.py`, `dashboard/`,
+  spec §28/§59-60, Phase 6): every field in `review/models.py`'s `Finding`
+  now has a home in a real table — `decide()`
+  (`review/decision.py`) already populates `validation_reasons`/
+  `validation_components` from `ValidationResult`, and both entry points
+  (`review_pull_request`, `_handle_pr_merged`) write repository/review_run/
+  changed_chunks/findings/evidence/validation_results/comments rows at the
+  natural points in their existing flow. Every write goes through
+  `review_store.safe_call()` (logs, never raises) so a DB outage can never
+  block the GitHub-facing review — the same resilience principle already
+  used for static-analysis tool failures. `validate_security()`
+  (`validation/validator.py`) now returns the four component scores that
+  produced its final score via `ValidationComponents`
+  (`validation/scoring.py`), not just the combined number — needed for the
+  dashboard finding-detail page's validation breakdown (spec §53);
+  `validate_documentation()` leaves it `None` since a pass-through has
+  nothing to break down. `driftwatch/dashboard/` (schemas.py/queries.py/
+  api.py) reads all of this back as a versioned, Pydantic-typed API
+  (`/api/v1/*`, mounted in `main.py` alongside the webhook router) for the
+  separate `dashboard/` Next.js app — CORS is scoped to a single
+  `DASHBOARD_ORIGIN` env var, inactive when unset. Golden-path subset only
+  (overview/repositories/review/finding); Observability/Evaluation/
+  Analytics pages, `evaluation_runs` persistence, and dashboard auth are
+  explicit follow-ups — see `docs/roadmap.md`'s Phase 6 report.
 - **Langfuse tracing** (`observability/tracing.py`, spec §25): `@traced_span`
   wraps the two top-level review-run entry points
   (`review.orchestrator.review_pull_request`,

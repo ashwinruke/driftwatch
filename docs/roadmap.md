@@ -16,7 +16,7 @@ Documentation drift becomes one review engine among several (security, bugs,
 quality, documentation), all sharing one `ReviewEngine` interface, one
 `Finding`/`Evidence` schema, and one validation/reporting pipeline.
 
-## Status: Phase 0, 1, 2, 3 and 4 done, Phase 5 in progress
+## Status: Phase 0-5 done, Phase 6 foundation + golden path done
 
 The repository has been reorganized into a `driftwatch/` package (see
 `CLAUDE.md`'s Architecture section for the current, accurate layout), and a
@@ -36,8 +36,14 @@ below for the schema-fit decisions this required) rather than wrapped in
 the same protocol literally, since it's triggered by a different webhook
 event entirely (merge, not open/sync/reopen). Phases 1, 2, and 4 are all
 confirmed live end-to-end against real PRs/merges — see the Phase 4 report
-below for the live merge test's actual result. Nothing from Phase 5 onward
-(bug/quality engines, Langfuse, CI, dashboard) has been built yet.
+below for the live merge test's actual result. Phase 5 (CI, Docker,
+Langfuse, README) is done — see its report below. Phase 6's persistence
+layer, dashboard read API, and the Next.js dashboard's golden-path pages
+(overview/repositories/review/finding) are done and verified against a
+real database and a real browser session — see the Phase 6 report below
+for exactly what's built vs. deliberately deferred (Observability/
+Evaluation/Analytics pages, dashboard auth, a full review-run state
+machine). Bug/quality engines still don't exist.
 
 ## Current baseline → target module mapping
 
@@ -145,7 +151,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | **Done — real report generated** |
 | 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | **Done — live-verified** |
 | 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | **In progress** — CI + Docker + Langfuse done (Langfuse live-verified on Render), README polish not started |
-| 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | Not started |
+| 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | **Foundation + golden path done** — persistence, read API, and overview/repositories/review/finding pages live-verified; observability/evaluation/analytics pages and auth deferred |
 
 ## Phase 0 report
 
@@ -677,7 +683,167 @@ window without any code change needed — with two nested LLM generations
 "ashwinruke/Multithreaded_Web_Server", "pull_request": <the real PR
 number>}`, confirmed directly by the user in the dashboard.
 
-### Recruiter README + docs polish (not started)
+### Recruiter README + docs polish (done)
+
+`README.md` rewritten top-to-bottom: repositioned from "doc-drift bot"
+(its pre-Phase-1 framing, stale since before the security engine,
+validation layer, evaluation metrics, CI, Docker, or Langfuse existed) to
+"evidence-grounded AI code reviewer that started as a documentation-drift
+bot." Every claim in the new version is sourced from a real file rather
+than asserted: the validation layer's actual scoring weights
+(`driftwatch/validation/scoring.py`), the real evaluation numbers
+(`evaluation/results/latest.md`), the actual posted-comment format
+(`driftwatch/reporting/comment_formatter.py`), and this file's own
+Phase 1/4/5 live-test write-ups. Adds an MIT `LICENSE` (a one-time,
+explicitly flagged legal choice, not a pure engineering one — approved
+before adding). Deliberately left `docs/roadmap.md` and `CLAUDE.md`
+unrewritten — both already serve a different audience (contributors/
+Claude Code, not a first-time recruiter reader); "polish" here means the
+README links out to them rather than duplicating their detail.
+
+## Phase 6 report
+
+Foundation + golden-path scope, per your explicit choice among three
+options (foundation-only / foundation+golden-path / everything in
+spec §50-64) — observability/evaluation/analytics pages and dashboard auth
+are an explicit follow-up, not silently dropped. Also chose Next.js/React/
+TypeScript over spec §50.2's Streamlit alternative (the "recruiter-facing"
+recommendation), and no auth for this MVP pass (a single personal demo
+deployment, read-only data — spec §62 allows keeping this simple).
+
+**The real discovery that shaped this phase**: nothing about a review run
+was persisted anywhere before this. `review_pull_request` and
+`_handle_pr_merged` computed findings, posted them to GitHub, and logged —
+then threw everything away. A dashboard needs history, so Phase 6
+genuinely starts by building the persistence layer spec §28 describes
+(trimmed — see below), not by building pages against data that doesn't
+exist yet.
+
+### Part 1: persistence schema + write-path wiring
+
+Extends `driftwatch/persistence/db.py`'s `setup_schema()` (same idempotent
+`CREATE TABLE IF NOT EXISTS` style `doc_sections` already uses — no
+Alembic, a deliberate scope trim, not an oversight) with `repositories`,
+`review_runs`, `changed_chunks`, `findings`, `evidence`,
+`validation_results`, `comments`. Every *decided* finding gets a row
+(accepted, rejected, AND needs_review), not just posted ones — the
+dashboard's findings table shows all three, and that data already existed
+in `decided`, just got discarded after each review.
+
+New write module `driftwatch/persistence/review_store.py`
+(`get_or_create_repository`, `start_review_run`, `record_changed_chunks`,
+`record_findings`, `record_comment`, `complete_review_run`), wired into
+both `review_pull_request` and `_handle_pr_merged` at the natural points
+in their existing flow. Every call goes through `review_store.safe_call`
+— logs and swallows any exception rather than raising, so a DB outage can
+never block the GitHub-facing review itself, the same resilience
+principle already applied to static-analysis tool failures.
+
+**A real gap this surfaced, fixed along the way**: `compute_score()`'s
+four component inputs (diff evidence, static corroboration, AST
+consistency, LLM confidence) were combined into one score and discarded —
+nothing kept them separately, which the dashboard's finding-detail
+validation breakdown (spec §53) needs to show. Fixed with a new
+`ValidationComponents` on `ValidationResult` (`validation/scoring.py`),
+populated by `validate_security()` from the exact values it already
+passes into `compute_score()` — no re-derivation. `validate_documentation()`
+leaves it `None` (a pass-through has no four-signal breakdown to show; the
+dashboard renders "pass-through, no breakdown" for these rather than
+fabricating four zeros).
+
+**Verified**: 113/113 tests pass (`tests/integration/test_security_review_
+flow.py` and `test_doc_drift_shared_pipeline.py` stub `review_store` at
+the same GitHub/LLM mocking boundary already used, asserting persistence
+is called with the right arguments rather than hitting a real DB — this
+also fixed a real slowdown caught mid-work: before stubbing, every
+integration test attempted a real (failing) DB connection, tripling local
+suite runtime from ~40s to ~150s). A real review run against local
+Postgres confirmed every table populates correctly with correct foreign
+keys, and the persisted `validation_results` row matched
+`compute_score()`'s formula exactly (1.0/1.0/1.0/0.9 → 0.985).
+
+### Part 2: dashboard read API
+
+New `driftwatch/dashboard/` package: `schemas.py` (Pydantic response
+models — spec §59: never expose a raw DB row), `queries.py` (read-only
+parameterized SQL via `RealDictCursor`), `api.py` (`APIRouter(prefix=
+"/api/v1")`), mounted in `main.py` alongside the webhook router. CORS
+added to `main.py`, scoped to a single `DASHBOARD_ORIGIN` env var (inactive
+when unset) rather than left open, since the Next.js dashboard calls this
+from a different origin.
+
+Golden-path subset of spec §59's endpoint list: `/dashboard/overview`,
+`/repositories`, `/repositories/{id}`, `/repositories/{id}/reviews`,
+`/reviews/{id}`, `/findings/{id}` — `/metrics`, `/observability`,
+`/evaluation/*` deferred (no `evaluation_runs` persistence exists either).
+Overview deliberately omits precision/false-positive-rate/cost KPIs — spec
+§56 makes clear those belong to the evaluation harness (labeled ground
+truth), not live production data with no ground truth, and
+`evaluation/results/latest.md`'s own "Known limitations" already says
+cost/token tracking isn't implemented; fabricating either here would
+violate the project's own "don't hide uncertainty behind a falsely
+confident claim" rule.
+
+**Verified**: 122/122 tests pass (`tests/integration/test_dashboard_api.py`
+monkeypatches `queries.py`, same boundary-mocking pattern as the rest of
+the suite). Manually curled every endpoint against local Postgres
+(populated by Part 1's real review run) — overview counts, repository
+list/detail, review detail, and finding detail (including the validation
+breakdown and linked GitHub comment URL) all returned correct, consistent
+data end to end.
+
+### Part 3: Next.js dashboard
+
+New top-level `dashboard/` (sibling to `driftwatch/`, first TypeScript/
+frontend code in this repo): Next.js 16 (App Router) + TypeScript +
+Tailwind CSS + Recharts, calling the backend via `NEXT_PUBLIC_API_URL`.
+Next.js 16 is newer than training-data knowledge of Next.js — its own
+generated `AGENTS.md` says as much — so its bundled docs
+(`node_modules/next/dist/docs/`) were read before writing any page,
+confirming dynamic route `params` are now `Promise`s that must be awaited,
+and surfacing the new `PageProps<'/route/[id]'>` global type helper used
+throughout instead of hand-writing param types.
+
+Pages: `/` (overview: KPI cards + two Recharts bar charts), `/repositories`
+(list), `/repositories/[id]` (detail + recent runs), `/repositories/[id]/
+reviews/[reviewId]` (PR review: stats + findings table), `/findings/[id]`
+(evidence + validation breakdown, or a "pass-through" notice for
+documentation findings). Server Components fetch directly from the API
+(`cache: "no-store"` — a dashboard should show current data, not a stale
+cache); only the two chart components are Client Components (Recharts
+needs the browser).
+
+**A real bug caught while building this, not by luck**: `FindingDetail`
+initially had no way to link back to its review — the schema had
+`review_run_id` but not `repository_id`, and the review page route is
+nested under `/repositories/[id]/reviews/[reviewId]`. Fixed by joining
+`review_runs` in `get_finding_detail` and adding `repository_id` to the
+response — a small Part 2 correction made while integrating Part 3, not
+deferred as a known issue.
+
+**Verified**: `tsc --noEmit` and `next build` both clean; `next lint`
+clean; the full backend suite re-run and still 122/122 after the
+`FindingDetail` fix. Live-verified in an actual browser session (Claude in
+Chrome), not just "should render": clicked the entire golden path —
+Overview (real KPI numbers + both charts rendering) → Repositories → repo
+detail → PR review page → finding detail (evidence list + validation
+breakdown, all four component scores + final score correct) → "Back to
+review" link (confirms the `repository_id` fix) — against the real local
+Postgres + FastAPI backend, zero console errors at any step. Also
+confirmed `/repositories/999` renders Next.js's `notFound()` page
+correctly (a real 404 path, not just the happy path).
+
+### Deliberately deferred (not silently dropped, tracked for a follow-up)
+
+Observability page (spec §55 — Langfuse already covers LLM-level tracing;
+this would add webhook/GitHub-API/static-analysis latency breakdowns),
+Evaluation page (spec §56 — needs `evaluation_runs` persistence, which
+doesn't exist: `cli/evaluate.py` still only writes local
+`evaluation/results/*.{md,json}`), Model/Prompt Analytics page (spec §57),
+dashboard auth (spec §62), a full `queued/running/cancelled` review-run
+state machine (spec §58 — reviews run synchronously within one background
+task, so `completed`/`failed` covers the MVP), CORS/Postgres in CI, and
+cost/token KPIs anywhere in the dashboard.
 
 ## Mandatory engineering rules (spec §42, condensed)
 

@@ -106,6 +106,7 @@ def get_finding_detail(finding_id: str):
     return schemas.FindingDetail(
         id=row["id"],
         review_run_id=row["review_run_id"],
+        repository_id=row["repository_id"],
         category=row["category"],
         severity=row["severity"],
         file_path=row["file_path"],

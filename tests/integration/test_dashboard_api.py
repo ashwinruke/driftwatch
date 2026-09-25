@@ -119,7 +119,7 @@ def test_finding_detail_not_found_returns_404(monkeypatch):
 
 def test_finding_detail_returns_validation_breakdown_when_present(monkeypatch):
     monkeypatch.setattr(queries, "get_finding_detail", lambda finding_id: {
-        "id": "f1", "review_run_id": 10, "category": "security", "severity": "high",
+        "id": "f1", "review_run_id": 10, "repository_id": 1, "category": "security", "severity": "high",
         "file_path": "app.py", "start_line": 1, "end_line": 2, "title": "SQL injection",
         "description": "d", "suggested_fix": "use params", "validation_status": "accepted",
         "validation_score": 0.985, "llm_confidence": 0.9, "validation_reasons": ["Location falls within the analyzed chunk"],
@@ -144,7 +144,7 @@ def test_finding_detail_has_no_breakdown_for_documentation_pass_through(monkeypa
     # the API must return validation_breakdown=None, not four nulls
     # dressed up as a breakdown.
     monkeypatch.setattr(queries, "get_finding_detail", lambda finding_id: {
-        "id": "f2", "review_run_id": 11, "category": "documentation", "severity": "info",
+        "id": "f2", "review_run_id": 11, "repository_id": 1, "category": "documentation", "severity": "info",
         "file_path": "README.md", "start_line": 1, "end_line": 1, "title": "Usage",
         "description": "d", "suggested_fix": None, "validation_status": "accepted",
         "validation_score": 0.83, "llm_confidence": 0.83, "validation_reasons": [],

@@ -106,6 +106,7 @@ class CommentRef(BaseModel):
 class FindingDetail(BaseModel):
     id: str
     review_run_id: int
+    repository_id: int
     category: str
     severity: str
     file_path: str

@@ -168,9 +168,13 @@ driftwatch/
 ├── validation/              # evidence checks, scoring, deduplication
 ├── reporting/                # inline-finding + PR-summary markdown formatting
 ├── observability/tracing.py  # optional Langfuse tracing (span + generation decorators)
-├── persistence/db.py         # PostgreSQL/pgvector connection + schema
+├── persistence/                # review_runs/findings/evidence schema + write path
+├── dashboard/                 # read-only API (schemas/queries/api) for the dashboard/ frontend
 └── cli/evaluate.py           # local evaluation harness, same code path as production
 ```
+
+`dashboard/` (repo root, sibling to `driftwatch/`) is a separate Next.js/
+TypeScript app calling the API above — see [Dashboard](#dashboard) below.
 
 ## Tech stack
 
@@ -195,8 +199,8 @@ driftwatch/
 | 2 — Validation layer | AST/diff checks, Semgrep+Bandit, scoring, dedup | Done — live-verified |
 | 3 — Evaluation & metrics | Labeled fixtures, precision/recall/F1 | Done — real report generated |
 | 4 — Documentation drift integration | Shared validation/reporting pipeline | Done — live-verified |
-| 5 — Observability, CI/CD, recruiter demo | CI, Docker, Langfuse | CI + Docker + Langfuse done (Langfuse live-verified on Render), README polish in progress |
-| 6 — Web dashboard | Overview/repo/review/finding/evaluation pages | Not started |
+| 5 — Observability, CI/CD, recruiter demo | CI, Docker, Langfuse, README | Done — Langfuse live-verified on Render |
+| 6 — Web dashboard | Overview/repo/review/finding pages | Foundation + golden path done — Observability/Evaluation/Analytics pages, auth deferred |
 
 Full phase-by-phase detail, live-test write-ups, and known limitations:
 [`docs/roadmap.md`](docs/roadmap.md). Full engineering spec:
@@ -278,6 +282,24 @@ the Postgres data volume). If you already have a standalone
 `driftwatch-postgres` container running from the manual setup above, stop
 it first (`docker stop driftwatch-postgres`) to free port 5432.
 
+## Dashboard
+
+A separate read-only Next.js app (`dashboard/`) shows review history,
+findings, and validation evidence across repositories — overview → repo →
+PR review → finding evidence, per spec §63's priority order. It calls the
+backend's `/api/v1/*` routes (`driftwatch/dashboard/`), which need at
+least one review run persisted to show anything (a real PR review, or a
+webhook simulation). See [`dashboard/README.md`](dashboard/README.md) for
+setup; short version:
+
+    cd dashboard
+    cp .env.local.example .env.local
+    npm install && npm run dev
+
+No auth yet (MVP — see `docs/roadmap.md`'s Phase 6 report for what's
+deferred: Observability/Evaluation/Analytics pages, dashboard auth, a full
+review-run state machine).
+
 ## Deployment notes
 
 Deployed on Render's free tier for demonstration purposes:
@@ -318,7 +340,10 @@ Deployed on Render's free tier for demonstration purposes:
 | driftwatch/validation/ | The validation layer: location/diff/AST checks, scoring, dedup |
 | driftwatch/reporting/ | Inline-finding and PR-summary markdown formatting |
 | driftwatch/observability/tracing.py | Optional Langfuse tracing: span + generation decorators |
-| driftwatch/persistence/db.py | PostgreSQL/pgvector connection + schema |
+| driftwatch/persistence/db.py | PostgreSQL/pgvector connection + schema (doc_sections + review_runs/findings/evidence) |
+| driftwatch/persistence/review_store.py | Writes a review run's data (findings, evidence, validation scores, comments) for the dashboard |
+| driftwatch/dashboard/ | Dashboard read API: schemas.py (Pydantic models), queries.py (SQL), api.py (FastAPI router) |
+| dashboard/ | The Next.js/TypeScript dashboard frontend (repo root, separate from `driftwatch/`) |
 | driftwatch/retry.py | Retry-with-backoff wrapper for transient API failures |
 | driftwatch/cli/evaluate.py | `python -m driftwatch.cli.evaluate` — runs the security pipeline against `evaluation/fixtures/`, reports precision/recall/F1/false-positive rate before vs. after validation |
 | evaluation/ | Local fixtures + ground truth + generated metrics reports (`results/latest.{md,json}`) |
