@@ -21,3 +21,8 @@ VALIDATION_REVIEW_THRESHOLD = float(os.environ.get("VALIDATION_REVIEW_THRESHOLD"
 # when set. LANGFUSE_SECRET_KEY/LANGFUSE_BASE_URL aren't read here -- the
 # Langfuse SDK reads those itself directly from the environment.
 LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")
+# Optional: the dashboard frontend's origin (e.g. a Vercel URL), enabling
+# CORS for the read-only /api/v1/* routes in driftwatch/dashboard/. Unset
+# by default -- the dashboard API works for local curl/testing either way,
+# this only matters for a browser calling it from a different origin.
+DASHBOARD_ORIGIN = os.environ.get("DASHBOARD_ORIGIN")
