@@ -5,6 +5,7 @@ from driftwatch.app import config
 from driftwatch.github.auth import get_installation_token
 from driftwatch.github.comments import post_pr_comment, post_review_comment
 from driftwatch.llm.provider import FallbackProvider, GeminiProvider, GroqProvider
+from driftwatch.observability.tracing import tag_current_run, traced_span
 from driftwatch.reporting.comment_formatter import format_finding_comment
 from driftwatch.reporting.pr_summary import format_pr_summary
 from driftwatch.retry import with_retry
@@ -42,6 +43,7 @@ def analyze_and_decide(chunks: list[dict], repository: str, pr_title: str, pr_bo
     return candidates, decided
 
 
+@traced_span("review-pull-request")
 def review_pull_request(payload: dict):
     """Security review for an opened/synchronize/reopened PR. Separate from
     (and untouched by) doc-drift's merge-triggered pipeline."""
@@ -52,6 +54,7 @@ def review_pull_request(payload: dict):
     pr_number = pr["number"]
     head_sha = pr["head"]["sha"]
 
+    tag_current_run(repository=repo_full, pull_request=pr_number)
     logger.info(f"Reviewing PR #{pr_number} in {repo_full} ({pr['title']!r}, action={payload.get('action')})")
 
     try:

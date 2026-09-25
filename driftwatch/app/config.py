@@ -17,3 +17,7 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 MAX_COMMENTS_PER_PR = int(os.environ.get("MAX_COMMENTS_PER_PR", "3"))
 VALIDATION_ACCEPT_THRESHOLD = float(os.environ.get("VALIDATION_ACCEPT_THRESHOLD", "0.75"))
 VALIDATION_REVIEW_THRESHOLD = float(os.environ.get("VALIDATION_REVIEW_THRESHOLD", "0.50"))
+# Optional: enables Langfuse tracing (driftwatch/observability/tracing.py)
+# when set. LANGFUSE_SECRET_KEY/LANGFUSE_BASE_URL aren't read here -- the
+# Langfuse SDK reads those itself directly from the environment.
+LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")

@@ -144,7 +144,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 | 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases + live-verified** |
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | **Done — real report generated** |
 | 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | **Done — live-verified** |
-| 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | **In progress** — CI + Docker done, Langfuse/README polish not started |
+| 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | **In progress** — CI + Docker + Langfuse done, README polish not started |
 | 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | Not started |
 
 ## Phase 0 report
@@ -583,7 +583,84 @@ compose network (not just that `DATABASE_URL` was set); a fresh `docker run
 --rm driftwatch-app:latest` confirmed neither `.env` nor `*.pem` exist
 inside the built image.
 
-### Langfuse, recruiter README (not started)
+### Langfuse LLM observability (done)
+
+Spec §25 wants LLM calls observable: review run, repository, PR number,
+model, latency, candidate/accepted/rejected counts, errors. Implemented as
+`driftwatch/observability/tracing.py` (single file — spec's target layout
+splits `langfuse.py`/`tracing.py`, collapsed since all the logic here is
+Langfuse-specific; a genuine minor deviation, not an oversight), exposing
+three primitives:
+
+- `traced_span(name)` — decorator for a top-level review-run entry point.
+  A span with no parent starts a new trace in OTel semantics, so this is
+  what spec §25 means by tracking a "review run."
+- `traced_generation(name)` — decorator for an actual LLM call; becomes a
+  nested generation inside whichever span is currently active, via OTel
+  context propagation (no manual trace-ID threading needed).
+- `tag_current_run(**metadata)` — attaches identifying metadata
+  (repository, pull_request) to the currently active span.
+
+Wired in: `@traced_span` on `review.orchestrator.review_pull_request`
+(security) and `github.webhooks._handle_pr_merged` (documentation), each
+calling `tag_current_run(repository=..., pull_request=...)` right after
+entry; `@traced_generation` on `GeminiProvider.generate_findings`,
+`GroqProvider.generate_findings`, and
+`analyzers.documentation.drafter.draft_update`. Deliberately NOT
+instrumented: `llm.embeddings.get_embedding` (a vector lookup, not a
+reasoning step) and `driftwatch.cli.evaluate` (per-fixture runs aren't a
+"review" in the spec's sense, and a short-lived script would need an
+explicit `flush()` call to guarantee delivery before exit — a real cost
+for a lower-value target; a possible follow-up, not done now).
+
+`langfuse==4.15.6` (the current OTel-based v4 SDK) — introspected its
+actual API directly (`venv/Lib/site-packages/langfuse/_client/client.py`)
+rather than trusting memory of a possibly older version. Confirmed
+`Langfuse()`/`get_client()` read `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`,
+and `LANGFUSE_BASE_URL` (checked before the more commonly-documented
+`LANGFUSE_HOST`) natively from the environment — no SDK-facing config code
+needed beyond `config.LANGFUSE_PUBLIC_KEY` itself, whose presence is the
+sole on/off switch (`LANGFUSE_SECRET_KEY`/`LANGFUSE_BASE_URL` aren't read
+by our code at all).
+
+Same "fully optional, additive" pattern as the Groq fallback: when
+`LANGFUSE_PUBLIC_KEY` isn't set, `traced_span`/`traced_generation` return
+the original function completely untouched — not even a no-op wrapper —
+so there's zero overhead and zero behavior change to the review pipeline
+when tracing isn't configured.
+
+**Real bug caught during this work, not just written and assumed
+correct**: the first full local test-suite run silently sent real trace
+data (`review-pull-request`, `handle-pr-merged`, a stray
+`groq-generate-findings`) to the live Langfuse project, because
+`conftest.py` only ever set the five *required* env vars and
+`driftwatch.app.config`'s `load_dotenv()` doesn't override an already-set
+var — so the developer's real `.env` (which now has live Langfuse
+credentials) leaked straight through into the test environment, and the
+integration tests exercise the exact `@traced_span`-wrapped production
+functions. Fixed by having `conftest.py` explicitly force
+`LANGFUSE_PUBLIC_KEY=""` before any `driftwatch` module is imported. Local
+suite runtime dropped from ~62s to ~38s after the fix, confirming those
+were real network calls, not just theoretical risk. The handful of
+pre-fix pollution traces are harmless test noise, left in the live
+project rather than scripted away for a one-time cleanup.
+
+`tests/unit/test_tracing.py`: identity-check that both decorators return
+the original function untouched when disabled (the safety property that
+matters most), plus monkeypatched enabled-path tests confirming the
+decorator actually wraps and `tag_current_run` calls
+`update_current_span` with the right metadata — without requiring a live
+Langfuse connection.
+
+**Verified**: full suite (`pytest tests/unit tests/integration -v`) passes
+at 111/111 with tracing forced off (the `conftest.py` default); `main.py`
+imports cleanly against the real, Langfuse-configured `.env` with tracing
+genuinely `ENABLED=True`; a manual nested-span/generation smoke test
+against the live Langfuse project, followed by an explicit `flush()`,
+produced a trace with correct nesting and metadata, confirmed by the user
+directly in the Langfuse dashboard.
+
+### Recruiter README + docs polish (not started)
 
 ## Mandatory engineering rules (spec §42, condensed)
 

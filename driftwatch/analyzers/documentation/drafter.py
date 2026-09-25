@@ -1,6 +1,7 @@
 from google import genai
 
 from driftwatch.app import config
+from driftwatch.observability.tracing import traced_generation
 
 _client = genai.Client(api_key=config.GEMINI_API_KEY)
 
@@ -21,6 +22,7 @@ REASON: one sentence explaining your verdict
 """
 
 
+@traced_generation("gemini-draft-update")
 def draft_update(code_chunk: dict, doc_section: dict) -> dict:
     prompt = DRAFT_PROMPT.format(
         chunk_type=code_chunk["type"],

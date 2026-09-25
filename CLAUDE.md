@@ -133,8 +133,12 @@ cutoffs the validation layer uses to decide accepted/needs_review/rejected
 `openai/gpt-oss-120b`) — if `GROQ_API_KEY` is set, the security engine
 falls back to Groq's OpenAI-compatible API when Gemini fails (added after
 a live 503 from Gemini under high demand); if unset, Gemini is used alone,
-same as before. All of these except the private-key pair are read once in
-`driftwatch/app/config.py`.
+same as before; `LANGFUSE_PUBLIC_KEY` — if set, enables Langfuse LLM
+observability tracing (see Architecture below); `LANGFUSE_SECRET_KEY` and
+`LANGFUSE_BASE_URL` are also required for tracing to actually work but
+aren't read by our code — the Langfuse SDK reads those itself directly
+from the environment. All of these except the private-key pair and the
+two Langfuse SDK-native vars are read once in `driftwatch/app/config.py`.
 
 Semgrep and Bandit (installed via `requirements.txt`) must be present as
 CLI executables for the security pipeline's static-analysis corroboration
@@ -202,6 +206,9 @@ driftwatch/
 │   ├── comment_formatter.py    # inline-finding markdown (security/bug/quality findings)
 │   └── pr_summary.py            # PR-level summary markdown
 ├── persistence/db.py        # PostgreSQL/pgvector connection + schema
+├── observability/tracing.py  # optional Langfuse tracing: traced_span/traced_generation
+│                             # decorators + tag_current_run() -- identity/no-op when
+│                             # LANGFUSE_PUBLIC_KEY isn't set (see Architecture below)
 ├── retry.py                  # retry-with-backoff wrapper
 └── cli/evaluate.py          # `python -m driftwatch.cli.evaluate` -- runs the security
                               # pipeline against evaluation/fixtures/, reusing
@@ -348,6 +355,27 @@ authority; only `validate()`'s output decides what gets posted.
 
 ## Key implementation details
 
+- **Langfuse tracing** (`observability/tracing.py`, spec §25): `@traced_span`
+  wraps the two top-level review-run entry points
+  (`review.orchestrator.review_pull_request`,
+  `github.webhooks._handle_pr_merged`) — a span with no parent starts a new
+  trace in OTel semantics, so each becomes one Langfuse trace per review
+  run, tagged via `tag_current_run(repository=..., pull_request=...)`.
+  `@traced_generation` wraps the actual LLM calls
+  (`GeminiProvider.generate_findings`, `GroqProvider.generate_findings`,
+  `analyzers.documentation.drafter.draft_update`), which become nested
+  generations inside whichever span is active via OTel context
+  propagation — no manual trace-ID threading. Same "fully optional"
+  pattern as the Groq fallback: with `LANGFUSE_PUBLIC_KEY` unset, both
+  decorators return the wrapped function completely untouched (not even a
+  no-op wrapper), so tracing has zero overhead and zero risk when not
+  configured. `tests/unit/test_tracing.py` covers both states.
+  `conftest.py` forces `LANGFUSE_PUBLIC_KEY=""` for every test run
+  regardless of what's in a developer's real `.env` — without this, the
+  integration tests (which exercise the real `@traced_span`-wrapped
+  production functions) would silently send real trace data to a live
+  Langfuse project on every local `pytest` run, which is exactly what
+  happened once before this was caught.
 - **Auth** (`github/auth.py`): GitHub App JWT (RS256, signed with the
   private key) exchanged for a short-lived installation token on every
   webhook delivery — not cached across requests. `load_private_key()`

@@ -9,6 +9,7 @@ from driftwatch.analyzers.documentation import analyze_chunk, index_specific_fil
 from driftwatch.app import config
 from driftwatch.github.auth import get_installation_token
 from driftwatch.github.comments import post_pr_comment
+from driftwatch.observability.tracing import tag_current_run, traced_span
 from driftwatch.reporting.comment_formatter import format_finding_comment
 from driftwatch.reporting.pr_summary import format_pr_summary
 from driftwatch.retry import with_retry
@@ -60,6 +61,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"status": "received"}
 
 
+@traced_span("handle-pr-merged")
 def _handle_pr_merged(payload: dict):
     """Documentation-drift review for a merged PR. Shares the CandidateFinding
     schema, decision.decide() (validation + dedup), and the reporting
@@ -71,6 +73,7 @@ def _handle_pr_merged(payload: dict):
     repo = payload["repository"]["name"]
     repo_full = payload["repository"]["full_name"]
     pr_number = pr["number"]
+    tag_current_run(repository=repo_full, pull_request=pr_number)
     logger.info(f"Merged PR #{pr_number} in {repo_full}: {pr['title']}")
 
     try:

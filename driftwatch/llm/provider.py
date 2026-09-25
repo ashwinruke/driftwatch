@@ -7,6 +7,7 @@ from google import genai
 from google.genai import types
 
 from driftwatch.app import config
+from driftwatch.observability.tracing import traced_generation
 from driftwatch.review.models import CandidateFinding
 
 logger = logging.getLogger("driftwatch")
@@ -48,6 +49,7 @@ class GeminiProvider:
         self._client = genai.Client(api_key=config.GEMINI_API_KEY)
         self._model = model
 
+    @traced_generation("gemini-generate-findings")
     def generate_findings(self, prompt: str) -> list[CandidateFinding]:
         response = self._client.models.generate_content(
             model=self._model,
@@ -80,6 +82,7 @@ class GroqProvider:
     def __init__(self, model: str | None = None):
         self._model = model or config.GROQ_MODEL
 
+    @traced_generation("groq-generate-findings")
     def generate_findings(self, prompt: str) -> list[CandidateFinding]:
         response = httpx.post(
             self.API_URL,
