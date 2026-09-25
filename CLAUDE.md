@@ -62,6 +62,19 @@ uvicorn main:app --reload --port 8000
 ngrok http 8000                 # expose it for GitHub webhook deliveries, local dev only
 ```
 
+Or, instead of the venv+`docker run`+`uvicorn` combination above:
+```
+docker compose up --build        # app + Postgres together, live reload, persistent volume
+```
+Requires `GITHUB_PRIVATE_KEY` (not `GITHUB_PRIVATE_KEY_PATH`) in `.env` --
+the `.pem` file is deliberately excluded from the built image via
+`.dockerignore` (same reasoning as `.gitignore`), so a file path doesn't
+resolve inside the container. `docker-compose.yml` overrides
+`DATABASE_URL` to point at the `postgres` service instead of `localhost`.
+Verified end-to-end: build succeeds, both services start, the app responds
+over HTTP, and `docker compose exec app python db.py` successfully reaches
+Postgres over the compose network.
+
 Build the initial doc index for a repo (one-off; edit the owner/repo args in
 `index_now.py` before running — it's a hardcoded script, not a general CLI):
 ```
@@ -491,3 +504,8 @@ authority; only `validate()`'s output decides what gets posted.
   `validate_documentation()`'s design) alongside the coexisting security
   pipeline's own finding on the same PR — see `docs/roadmap.md`'s Phase 4
   report for the full result.
+- **`.dockerignore` excludes `.env` and `*.pem`** — verified after building:
+  neither file exists inside the built `driftwatch-app` image. Secrets are
+  injected at `docker compose up` runtime (`env_file: .env`), never baked
+  into a layer. Don't add a `COPY .env` or similar to the `Dockerfile`
+  even for convenience.

@@ -144,7 +144,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 | 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases + live-verified** |
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | **Done — real report generated** |
 | 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | **Done — live-verified** |
-| 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | **In progress** — CI done, Docker/Langfuse/README polish not started |
+| 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | **In progress** — CI + Docker done, Langfuse/README polish not started |
 | 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | Not started |
 
 ## Phase 0 report
@@ -545,11 +545,45 @@ red:
 **Verified:** all four non-pytest steps (`ruff check`, `bandit -ll`,
 `semgrep`, the evaluate-import smoke test) run and pass locally exactly as
 written in the workflow, and the full suite (`pytest tests/unit
-tests/integration -v`) passes at 105/105. Actual CI verification (does a
-real GitHub Actions run go green) happens once this is pushed — a
-workflow's runner environment isn't fully reproducible locally.
+tests/integration -v`) passes at 105/105. **Live-confirmed**: the first
+real GitHub Actions run on this workflow (commit `08711d6`) went fully
+green, and the README's CI badge shows "passing."
 
-### Docker local dev, Langfuse, recruiter README (not started)
+### Docker local dev (done)
+
+`Dockerfile` (Python 3.12-slim, matching CI/local dev) + `docker-compose.yml`
+(app + `pgvector/pgvector:pg16`, live-reload volume mount, persistent named
+volume for Postgres data, healthcheck-gated `depends_on` so the app doesn't
+race Postgres's startup). `.dockerignore` excludes `.env`/`*.pem` from the
+build context — secrets are injected at `docker compose up` runtime via
+`env_file: .env`, never baked into an image layer.
+
+One real design decision: `GITHUB_PRIVATE_KEY_PATH` (the local-file mode)
+can't work inside the container, since the `.pem` file is deliberately
+excluded from the image. Docker Compose users need `GITHUB_PRIVATE_KEY`
+(full key contents) in `.env` instead — the same env-var mode production
+already uses on Render. This keeps the container image itself
+secret-free rather than needing to bind-mount a key file (whose filename
+also changes on each rotation, as already happened once this project).
+
+The existing manual venv + standalone-Postgres-container + `uvicorn`
+workflow is left completely untouched (Rule 2) — Compose is an additional,
+alternative path, not a replacement, since it's a genuinely different
+workflow (e.g. the app also live-reloads via a bind mount rather than
+running directly on the host).
+
+**Verified end-to-end**, not just written: `docker compose up --build`
+built and started both services; `docker compose logs app` showed a clean
+FastAPI startup with no errors; `curl localhost:8000/webhook` returned the
+expected `401` (real signature verification against the real
+`GITHUB_WEBHOOK_SECRET` from `.env`, loaded through `env_file`); `docker
+compose exec app python db.py` successfully created the schema, confirming
+the app container can actually reach the `postgres` service over the
+compose network (not just that `DATABASE_URL` was set); a fresh `docker run
+--rm driftwatch-app:latest` confirmed neither `.env` nor `*.pem` exist
+inside the built image.
+
+### Langfuse, recruiter README (not started)
 
 ## Mandatory engineering rules (spec §42, condensed)
 

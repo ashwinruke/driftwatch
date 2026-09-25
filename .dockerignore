@@ -1,0 +1,14 @@
+# Never bake secrets into the image -- .env/.pem are injected at
+# `docker compose up` runtime instead (env_file: / a bind mount), not at
+# build time. Mirrors .gitignore's reasoning for the same files.
+.env
+*.pem
+
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.github/
+evaluation/results/runs/
+.DS_Store

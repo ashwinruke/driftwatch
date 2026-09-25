@@ -127,6 +127,27 @@ GitHub Actions, see the badge above):
     pytest tests/unit tests/integration -v
     ruff check driftwatch tests main.py db.py index_now.py conftest.py
 
+### Alternative: Docker Compose
+
+Instead of the manual venv + `docker run` + `uvicorn` steps above,
+`docker compose up --build` starts the app and Postgres together, with
+live code reload and a persistent data volume. You still need the `.env`
+file described above, with one difference: set `GITHUB_PRIVATE_KEY` (the
+full key contents) instead of `GITHUB_PRIVATE_KEY_PATH` — the `.pem` file
+itself is deliberately excluded from the built image (`.dockerignore`,
+same reasoning as `.gitignore`), so a file path won't resolve inside the
+container. `DATABASE_URL` is overridden automatically in
+`docker-compose.yml` to point at the `postgres` service rather than
+`localhost`.
+
+    docker compose up --build
+
+The app is then reachable at `http://localhost:8000`, same as running
+`uvicorn` directly. `docker compose down` stops it (add `-v` to also drop
+the Postgres data volume). If you already have a standalone
+`driftwatch-postgres` container running from the manual setup above, stop
+it first (`docker stop driftwatch-postgres`) to free port 5432.
+
 ## Project structure
 
 The bot is being expanded into a modular AI code reviewer; see
