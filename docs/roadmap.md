@@ -34,12 +34,10 @@ with `SecurityEngine` as the first implementation; doc-drift's matching +
 verification logic is adapted into the same schema (see the Phase 4 report
 below for the schema-fit decisions this required) rather than wrapped in
 the same protocol literally, since it's triggered by a different webhook
-event entirely (merge, not open/sync/reopen). Phases 1 and 2 are confirmed
-live end-to-end against a real PR; Phase 4's local test suite passes (105
-tests) but it still needs a live merged-PR test before being fully signed
-off, given it rewrote the project's oldest, previously-live-stable code
-path — see the Phase 4 report below. Nothing from Phase 5 onward (bug/
-quality engines, Langfuse, CI, dashboard) has been built yet.
+event entirely (merge, not open/sync/reopen). Phases 1, 2, and 4 are all
+confirmed live end-to-end against real PRs/merges — see the Phase 4 report
+below for the live merge test's actual result. Nothing from Phase 5 onward
+(bug/quality engines, Langfuse, CI, dashboard) has been built yet.
 
 ## Current baseline → target module mapping
 
@@ -145,7 +143,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 | 1 — GitHub PR review MVP | Webhooks for opened/synchronize/reopened, Python diff/context analysis, LLM provider interface, security engine first, inline comments + PR summary | A seeded vulnerability in a test PR produces one accurate inline finding | **Done — live-verified** |
 | 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases + live-verified** |
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | **Done — real report generated** |
-| 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | **Code done, pending live merge test** |
+| 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | **Done — live-verified** |
 | 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | Not started |
 | 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | Not started |
 
@@ -465,10 +463,38 @@ after the refactor — same pipeline, same result shape, confirming
 evaluation and the live security path still share one code path.
 `main.py` imports cleanly against the real `.env`.
 
-**Not yet done**: a live test against a real merged PR (find_stale_sections
-+ draft_update running for real, posting through the new shared
-formatter). Not marking this phase fully signed off until that happens,
-given the blast radius of rewriting `_handle_pr_merged`.
+**Live-tested and confirmed** against `ashwinruke/Multithreaded_Web_Server`:
+merged a PR changing `run_backup` to contradict an indexed doc section
+("...using the system shell"). The bot posted, in the new shared format:
+
+```
+Documentation: run_backup
+Issue: The code executes the command directly without using the system
+shell, contrary to the documentation's claim.
+Evidence: Diff (embedding similarity match) + LLM (the reasoning above)
+Suggested fix: run_backup(target_dir) runs a backup of the given directory.
+Status: accepted | Static analysis: not corroborated
+Validation score: 0.873 | LLM confidence: 0.873
+```
+
+Confirms `validate_documentation()`'s design exactly: score equals the
+embedding similarity/confidence (no code-specific checks applied), static
+corroboration is honestly reported as not applicable, and the PR summary
+correctly attributed it to `Category: Documentation`. The same merge also
+re-triggered a security finding on the same file (a real, differently
+-worded argument-injection/path-traversal concern, unrelated to this test
+but confirming the two pipelines coexist correctly on the same PR without
+interfering with each other).
+
+**One process note, not a code issue**: getting this live test running
+required two fixes to the *test setup*, not the code: (1) `index_now.py`
+was initially run against the local Docker Postgres instead of the live
+Render database the deployed bot actually queries — different databases
+entirely — so the newly-indexed doc section was invisible to production
+until re-indexed against Render's `DATABASE_URL`; (2) a stale
+`GITHUB_PRIVATE_KEY_PATH` in local `.env` still pointed at the pre-rotation
+key filename from the Phase 1 incident. Both are local dev-environment
+issues, not bugs in the shipped code.
 
 ## Mandatory engineering rules (spec §42, condensed)
 

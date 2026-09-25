@@ -20,7 +20,7 @@ review engines behind a validation layer, plus eventually a dashboard), per
 `docs/roadmap.md` for the condensed phased plan, current-file→target-module
 mapping, and phase status.
 
-**Phases 0-4 are done** (refactor, security review MVP, validation layer,
+**Phases 0-4 are done and live-verified** (refactor, security review MVP, validation layer,
 evaluation, documentation-drift integration) — the flat-file layout is now
 the `driftwatch/` package described below, a security review engine runs
 on `opened`/`synchronize`/`reopened` PR events, and every posted finding
@@ -469,5 +469,10 @@ authority; only `validate()`'s output decides what gets posted.
   (`analyzers/documentation/formatting.py`/`format_drift_comment` were
   deleted, superseded by `reporting/comment_formatter.py`). Confirmed with
   the user before making the change, since it altered the project's
-  oldest, longest-stable live behavior — see `docs/roadmap.md`'s Phase 4
-  report.
+  oldest, longest-stable live behavior. **Live-verified**: a merged PR
+  against `ashwinruke/Multithreaded_Web_Server` that contradicted an
+  indexed doc section produced a correctly-formatted `Documentation`
+  finding (`validation score == LLM confidence`, exactly per
+  `validate_documentation()`'s design) alongside the coexisting security
+  pipeline's own finding on the same PR — see `docs/roadmap.md`'s Phase 4
+  report for the full result.
