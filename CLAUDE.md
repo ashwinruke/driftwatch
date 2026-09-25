@@ -80,7 +80,22 @@ Run the test suite:
 ```
 pytest tests/unit tests/integration -v
 ```
-There is no linter configured. `tests/unit/` covers pure/deterministic
+
+Lint (also runs automatically on every push/PR via
+`.github/workflows/ci.yml`, alongside a self-scan of `driftwatch/` with
+Bandit and the bundled Semgrep ruleset, and an evaluation-module import
+smoke test — not a real evaluation run, see `ruff.toml`'s comments and
+`docs/roadmap.md`'s Phase 5 report for why):
+```
+ruff check driftwatch tests main.py db.py index_now.py conftest.py
+```
+Uses Ruff's conservative traditional rule selection (`E4`/`E7`/`E9`/`F` —
+pyflakes + pycodestyle errors), not the newer expanded default, which
+flags a lot of real-but-opinionated style choices in this codebase that
+aren't bugs. `ruff format` is deliberately not enforced — the codebase
+predates any formatter and would need a large one-time reformat first.
+
+`tests/unit/` covers pure/deterministic
 logic (signature verification, tree-sitter chunk matching, markdown
 chunking, retry backoff, private-key loading, decision filtering, comment
 formatting, LLM-response parsing) — nothing that needs live

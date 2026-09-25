@@ -1,0 +1,9 @@
+# Conservative, traditional Ruff defaults (pycodestyle errors + pyflakes:
+# undefined names, unused imports/vars, syntax errors) rather than the
+# newer expanded default selection, which flags a lot of real-but-opinionated
+# style choices (blind except, pylint-style import aliasing, etc.) that
+# aren't bugs. Deliberately not enforcing `ruff format` here either -- the
+# codebase predates any formatter and reformatting it is a separate,
+# deliberate decision, not a side effect of adding a linter.
+[lint]
+select = ["E4", "E7", "E9", "F"]

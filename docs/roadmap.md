@@ -16,7 +16,7 @@ Documentation drift becomes one review engine among several (security, bugs,
 quality, documentation), all sharing one `ReviewEngine` interface, one
 `Finding`/`Evidence` schema, and one validation/reporting pipeline.
 
-## Status: Phase 0, 1, 2, 3 and 4 done, Phase 5 not started
+## Status: Phase 0, 1, 2, 3 and 4 done, Phase 5 in progress
 
 The repository has been reorganized into a `driftwatch/` package (see
 `CLAUDE.md`'s Architecture section for the current, accurate layout), and a
@@ -144,7 +144,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 | 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases + live-verified** |
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | **Done — real report generated** |
 | 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | **Done — live-verified** |
-| 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | Not started |
+| 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | **In progress** — CI done, Docker/Langfuse/README polish not started |
 | 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | Not started |
 
 ## Phase 0 report
@@ -495,6 +495,61 @@ until re-indexed against Render's `DATABASE_URL`; (2) a stale
 `GITHUB_PRIVATE_KEY_PATH` in local `.env` still pointed at the pre-rotation
 key filename from the Phase 1 incident. Both are local dev-environment
 issues, not bugs in the shipped code.
+
+## Phase 5 report
+
+Unlike Phases 1-4, this phase bundles several genuinely independent things
+(spec §36/§37/§41) rather than one cohesive feature, so it's tracked
+sub-part by sub-part as each lands, in the priority order requested:
+
+### CI (done)
+
+`.github/workflows/ci.yml`: lint (Ruff) → security self-scan (Bandit +
+the bundled Semgrep ruleset, against `driftwatch/` itself) → an evaluation-
+module import smoke test → `pytest`. Runs on every push to `main` and every
+PR. No repo secrets needed anywhere in it.
+
+Checked before writing the workflow, so the first run would be green, not
+red:
+- Ruff's newer expanded default rule selection flagged 21 real-but-
+  opinionated findings (blind-except, pylint-style import aliasing,
+  implicit string concat, unnecessary `dict()` calls) — none are bugs.
+  Pinned to the traditional conservative selection instead
+  (`ruff.toml`: `E4`/`E7`/`E9`/`F` — pyflakes + pycodestyle errors), which
+  passes with zero findings against the current code.
+- `ruff format --check` would reformat 41 of 74 files — the codebase
+  predates any formatter. Not enforcing formatting in this pass; a
+  one-time reformat is a separate, deliberate decision to make later if
+  wanted, not a side effect of adding a linter.
+- Bandit self-scanning `driftwatch/` surfaces 4 low-severity findings, all
+  the same generic "review this subprocess call" notice seen before in
+  `static_analysis/{bandit,semgrep}.py` (which legitimately shell out with
+  `shell=False`) — zero medium/high. `bandit -r driftwatch -ll` (fail only
+  on medium+) is clean.
+- Semgrep's own bundled ruleset against `driftwatch/` itself: zero
+  results, zero errors — a real, meaningful check, not just decoration.
+- No type checker added — the codebase doesn't use type hints consistently
+  enough for mypy/pyright to pass without real investigation effort not
+  otherwise asked for; spec §37 itself says "do not duplicate checks
+  unnecessarily," so this is deferred rather than forced in.
+- No real `python -m driftwatch.cli.evaluate` run in CI — it needs live
+  Gemini/Groq credentials (a secrets-management step) and makes real LLM
+  calls on every push, and Phase 3 already observed Gemini's free-tier
+  rate limit (429) firing mid-run — a plausible source of CI flakiness
+  unrelated to code correctness. Substituted a real but free check: `python
+  -c "import driftwatch.cli.evaluate"` confirms the module and its full
+  dependency chain import cleanly, using the same dummy env vars
+  `conftest.py` uses for pytest (needed explicitly here since bare `python
+  -c` doesn't auto-load `conftest.py` the way pytest does).
+
+**Verified:** all four non-pytest steps (`ruff check`, `bandit -ll`,
+`semgrep`, the evaluate-import smoke test) run and pass locally exactly as
+written in the workflow, and the full suite (`pytest tests/unit
+tests/integration -v`) passes at 105/105. Actual CI verification (does a
+real GitHub Actions run go green) happens once this is pushed — a
+workflow's runner environment isn't fully reproducible locally.
+
+### Docker local dev, Langfuse, recruiter README (not started)
 
 ## Mandatory engineering rules (spec §42, condensed)
 

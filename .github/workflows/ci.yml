@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: ruff check driftwatch tests main.py db.py index_now.py conftest.py
+
+      - name: Security self-scan (bandit)
+        run: bandit -r driftwatch -ll -q
+
+      - name: Security self-scan (semgrep, bundled ruleset)
+        run: semgrep --config driftwatch/static_analysis/rules/security.yml --quiet driftwatch
+
+      - name: Evaluation module smoke test
+        # Not a real evaluation run: that needs live Gemini/Groq
+        # credentials and makes real LLM calls on every push, which
+        # Phase 3 already found to be flaky under Gemini's free-tier rate
+        # limit. This just confirms the module and its dependency chain
+        # import cleanly. Dummy env vars match tests/conftest.py's values.
+        env:
+          GITHUB_APP_ID: test-app-id
+          GITHUB_WEBHOOK_SECRET: test-webhook-secret
+          GITHUB_INSTALLATION_ID: test-installation-id
+          GEMINI_API_KEY: test-gemini-key
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+        run: python -c "import driftwatch.cli.evaluate"
+
+      - name: Test suite (pytest)
+        run: pytest tests/unit tests/integration -v

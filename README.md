@@ -1,5 +1,7 @@
 # DriftWatch
 
+![CI](https://github.com/ashwinruke/driftwatch/actions/workflows/ci.yml/badge.svg)
+
 Autonomous GitHub bot that detects documentation drift in merged PRs.
 Watches merged pull requests, matches changed code to the doc sections
 that reference it using embeddings, and posts a PR comment flagging
@@ -118,6 +120,12 @@ Run the webhook server:
 Expose it for GitHub's webhook (dev only):
 
     ngrok http 8000
+
+Run the test suite and linter (also run automatically on every push/PR via
+GitHub Actions, see the badge above):
+
+    pytest tests/unit tests/integration -v
+    ruff check driftwatch tests main.py db.py index_now.py conftest.py
 
 ## Project structure
 
