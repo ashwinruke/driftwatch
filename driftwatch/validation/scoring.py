@@ -14,11 +14,24 @@ WEIGHT_AST_CONSISTENCY = 0.20
 WEIGHT_LLM_CONFIDENCE = 0.15
 
 
+class ValidationComponents(BaseModel):
+    """The four inputs that produced a ValidationResult.score, kept
+    alongside it (not just the combined number) so the dashboard's finding
+    detail page (spec §53) can show the real breakdown rather than
+    re-deriving or guessing it after the fact."""
+
+    diff_evidence: float
+    static_corroboration: float
+    ast_consistency: float
+    llm_confidence: float
+
+
 class ValidationResult(BaseModel):
     status: Literal["accepted", "rejected", "needs_review"]
     score: float
     reasons: list[str] = []
     evidence: list[Evidence] = []
+    components: ValidationComponents | None = None
 
 
 def compute_score(diff_evidence: float, static_corroboration: float, ast_consistency: float, llm_confidence: float) -> float:

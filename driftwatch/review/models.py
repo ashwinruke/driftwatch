@@ -63,5 +63,12 @@ class Finding(BaseModel):
 
     static_matches: list[StaticMatch] = []
     validation_status: Literal["accepted", "rejected", "needs_review"] = "needs_review"
+    validation_reasons: list[str] = []
+    # Plain dict (diff_evidence/static_corroboration/ast_consistency/
+    # llm_confidence), not validation.scoring.ValidationComponents, to
+    # avoid a review.models <-> validation.scoring import cycle. None for
+    # documentation findings (validate_documentation is a pass-through with
+    # no components to break down -- see validation/validator.py).
+    validation_components: dict[str, float] | None = None
 
     suggested_fix: str | None = None

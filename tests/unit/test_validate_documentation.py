@@ -42,6 +42,13 @@ def test_evidence_includes_diff_and_llm_sources():
     assert "llm" in sources
 
 
+def test_documentation_has_no_component_breakdown():
+    # A pass-through has no four-signal breakdown to show -- the dashboard
+    # should render "pass-through, no breakdown" rather than fabricate one.
+    result = validate_documentation(_candidate(), _chunk())
+    assert result.components is None
+
+
 def test_dispatcher_routes_documentation_category_to_validate_documentation():
     # A location that would fail validate_security's Stage A (file_path
     # doesn't match the chunk's file) must NOT cause a rejection here --

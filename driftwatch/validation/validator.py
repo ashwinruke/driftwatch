@@ -3,7 +3,7 @@ import logging
 from driftwatch.review.models import CandidateFinding, Evidence, StaticMatch
 from driftwatch.validation.evidence import validate_syntactic
 from driftwatch.validation.rules import check_claim_consistency
-from driftwatch.validation.scoring import ValidationResult, compute_score, decide_status
+from driftwatch.validation.scoring import ValidationComponents, ValidationResult, compute_score, decide_status
 
 logger = logging.getLogger("driftwatch")
 
@@ -56,10 +56,13 @@ def validate_security(candidate: CandidateFinding, chunk: dict) -> ValidationRes
     if claim_reason:
         reasons.append(claim_reason)
 
+    diff_evidence = 1.0 if syntactic.diff_overlap else 0.6
+    static_corroboration = 1.0 if corroborating else 0.0
+    ast_consistency = 1.0
     score = compute_score(
-        diff_evidence=1.0 if syntactic.diff_overlap else 0.6,
-        static_corroboration=1.0 if corroborating else 0.0,
-        ast_consistency=1.0,
+        diff_evidence=diff_evidence,
+        static_corroboration=static_corroboration,
+        ast_consistency=ast_consistency,
         llm_confidence=candidate.confidence,
     )
     if not consistent:
@@ -67,7 +70,13 @@ def validate_security(candidate: CandidateFinding, chunk: dict) -> ValidationRes
 
     status = decide_status(score)
     logger.info(f"Validated '{candidate.title}': {status} (score={round(score, 3)})")
-    return ValidationResult(status=status, score=round(score, 3), reasons=reasons, evidence=evidence)
+    components = ValidationComponents(
+        diff_evidence=diff_evidence,
+        static_corroboration=static_corroboration,
+        ast_consistency=ast_consistency,
+        llm_confidence=candidate.confidence,
+    )
+    return ValidationResult(status=status, score=round(score, 3), reasons=reasons, evidence=evidence, components=components)
 
 
 def validate_documentation(candidate: CandidateFinding, chunk: dict) -> ValidationResult:

@@ -38,6 +38,8 @@ def decide(
             validation_score=result.score,
             static_matches=list(chunk.get("static_matches", [])),
             validation_status=result.status,
+            validation_reasons=result.reasons,
+            validation_components=result.components.model_dump() if result.components else None,
             suggested_fix=candidate.suggested_fix,
         )
         decided.append((finding, chunk))

@@ -10,6 +10,7 @@ from driftwatch.app import config
 from driftwatch.github.auth import get_installation_token
 from driftwatch.github.comments import post_pr_comment
 from driftwatch.observability.tracing import tag_current_run, traced_span
+from driftwatch.persistence import review_store
 from driftwatch.reporting.comment_formatter import format_finding_comment
 from driftwatch.reporting.pr_summary import format_pr_summary
 from driftwatch.retry import with_retry
@@ -76,12 +77,20 @@ def _handle_pr_merged(payload: dict):
     tag_current_run(repository=repo_full, pull_request=pr_number)
     logger.info(f"Merged PR #{pr_number} in {repo_full}: {pr['title']}")
 
+    repository_id = review_store.safe_call(review_store.get_or_create_repository, owner, repo)
+    review_run_id = review_store.safe_call(
+        review_store.start_review_run,
+        repository_id, pr_number, pr["title"], pr.get("user", {}).get("login"), pr.get("head", {}).get("sha"), "documentation",
+    ) if repository_id else None
+
     try:
         token = get_installation_token(config.GITHUB_APP_ID, config.GITHUB_INSTALLATION_ID)
         chunks = extract_changed_chunks(owner, repo, pr_number, token)
 
         if not chunks:
             logger.info(f"No relevant code changes found in PR #{pr_number} (no .py files changed, or no function/class-level changes detected)")
+        elif review_run_id:
+            review_store.safe_call(review_store.record_changed_chunks, review_run_id, chunks)
 
         candidates: list[tuple] = []
         for chunk in chunks:
@@ -89,6 +98,9 @@ def _handle_pr_merged(payload: dict):
             candidates.extend(analyze_chunk(chunk, repo_full))
 
         decided = decision.decide(candidates, repo_full, pr_number)
+        all_decided_findings = [finding for finding, _ in decided]
+        if review_run_id:
+            review_store.safe_call(review_store.record_findings, review_run_id, all_decided_findings)
 
         posted_findings = []
         for finding, _ in decided:
@@ -100,18 +112,26 @@ def _handle_pr_merged(payload: dict):
                 break
 
             comment_body = format_finding_comment(finding)
-            with_retry(post_pr_comment, owner, repo, pr_number, token, comment_body)
+            response = with_retry(post_pr_comment, owner, repo, pr_number, token, comment_body)
+            if review_run_id:
+                review_store.safe_call(review_store.record_comment, review_run_id, finding.id, "finding", response)
             posted_findings.append(finding)
             logger.info(f"Posted comment for '{finding.title}' ({len(posted_findings)}/{config.MAX_COMMENTS_PER_PR})")
 
         if candidates:
             candidate_findings = [candidate for candidate, _ in candidates]
-            all_decided_findings = [finding for finding, _ in decided]
             summary = format_pr_summary(len(chunks), candidate_findings, all_decided_findings, posted_findings)
-            with_retry(post_pr_comment, owner, repo, pr_number, token, summary)
+            summary_response = with_retry(post_pr_comment, owner, repo, pr_number, token, summary)
+            if review_run_id:
+                review_store.safe_call(review_store.record_comment, review_run_id, None, "summary", summary_response)
 
-    except Exception:
+        if review_run_id:
+            review_store.safe_call(review_store.complete_review_run, review_run_id, "completed")
+
+    except Exception as e:
         logger.exception(f"Failed processing PR #{pr_number}")
+        if review_run_id:
+            review_store.safe_call(review_store.complete_review_run, review_run_id, "failed", str(e))
 
 
 def _handle_push(payload: dict):
