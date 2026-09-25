@@ -144,7 +144,7 @@ phase out of order — each has an explicit exit criterion in the spec.
 | 2 — Validation layer | AST/location/diff-relevance validation, Semgrep + Bandit adapters, scoring, accept/reject/needs-review, deduplication | Same eval set run with validation on vs. off shows a measurable difference | **Done — golden cases + live-verified** |
 | 3 — Evaluation & metrics | Labeled eval dataset, precision/recall/F1, false-positive rate, latency/cost metrics, `python -m driftwatch.cli.evaluate` | Produces `evaluation/results/latest.{md,json}` | **Done — real report generated** |
 | 4 — Documentation drift integration | Move doc-drift into the common `ReviewEngine` interface, shared validation/reporting | Security/bug/quality/doc findings share one pipeline | **Done — live-verified** |
-| 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | **In progress** — CI + Docker + Langfuse done, README polish not started |
+| 5 — Observability, CI/CD, recruiter demo | Langfuse tracing, Docker local setup, GitHub Actions, seeded demo PR, metrics report | A recruiter can understand what/why/how/results/repro from the repo alone | **In progress** — CI + Docker + Langfuse done (Langfuse live-verified on Render), README polish not started |
 | 6 — Web dashboard | Next.js/React + FastAPI read API: overview, repo list/detail, PR review page, finding evidence, observability, evaluation pages | User can navigate overview → repo → review → finding → evidence → metrics | Not started |
 
 ## Phase 0 report
@@ -657,8 +657,25 @@ at 111/111 with tracing forced off (the `conftest.py` default); `main.py`
 imports cleanly against the real, Langfuse-configured `.env` with tracing
 genuinely `ENABLED=True`; a manual nested-span/generation smoke test
 against the live Langfuse project, followed by an explicit `flush()`,
-produced a trace with correct nesting and metadata, confirmed by the user
-directly in the Langfuse dashboard.
+produced a trace with correct nesting and metadata.
+
+**Live-verified on the deployed Render service** (commit `4ca4c0c`), not
+just locally — this was the real test, since production code never calls
+`flush()` explicitly and relies entirely on the Langfuse SDK's default
+background batch export, which is a genuinely different code path than
+the local smoke test above (that one flushed manually) and could plausibly
+have failed under Render's free-tier process lifecycle even though the
+local test passed: opened a PR against
+`ashwinruke/Multithreaded_Web_Server` with a seeded vulnerability, which
+the deployed service picked up and reviewed via
+`BackgroundTasks.add_task(review_pull_request, ...)`. A `review-pull-request`
+trace appeared in the Langfuse dashboard ~30-50s later — confirming the
+default batch exporter flushes reliably within a normal webhook-handling
+window without any code change needed — with two nested LLM generations
+(one per changed chunk in the PR) both showing real, non-zero latency, and
+`metadata` correctly showing `{"repository":
+"ashwinruke/Multithreaded_Web_Server", "pull_request": <the real PR
+number>}`, confirmed directly by the user in the dashboard.
 
 ### Recruiter README + docs polish (not started)
 
