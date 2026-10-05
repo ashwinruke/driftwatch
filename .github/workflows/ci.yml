@@ -9,6 +9,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # Throwaway database for the tests/db round-trip suite, created fresh on
+    # each run. The credentials are CI-only and protect nothing.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: driftwatch
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:password@localhost:5432/driftwatch
+
     steps:
       - uses: actions/checkout@v4
 
@@ -18,6 +37,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Create database schema
+        run: python db.py
 
       - name: Lint (ruff)
         run: ruff check driftwatch tests main.py db.py index_now.py conftest.py
@@ -43,7 +65,9 @@ jobs:
         run: python -c "import driftwatch.cli.evaluate"
 
       - name: Test suite (pytest)
-        run: pytest tests/unit tests/integration -v
+        env:
+          RUN_DB_TESTS: "1"
+        run: pytest tests/unit tests/integration tests/db -v
 
   dashboard:
     runs-on: ubuntu-latest

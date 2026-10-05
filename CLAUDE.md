@@ -102,6 +102,13 @@ Run the test suite:
 pytest tests/unit tests/integration -v
 ```
 
+Database round-trip tests (`tests/db/`) run against a real Postgres and are
+skipped by default. CI runs them against a pgvector service container. To run
+locally, point `DATABASE_URL` at a database with the schema applied, then:
+```
+RUN_DB_TESTS=1 pytest tests/db -v
+```
+
 Lint (also runs automatically on every push/PR via
 `.github/workflows/ci.yml`, alongside a self-scan of `driftwatch/` with
 Bandit and the bundled Semgrep ruleset, and an evaluation-module import
