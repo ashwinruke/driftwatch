@@ -3,11 +3,23 @@
 Phase 6 report). Every route builds a schemas.py Pydantic model from
 queries.py's raw rows; nothing here returns a database row directly."""
 
-from fastapi import APIRouter, HTTPException
+import hmac
 
+from fastapi import APIRouter, Depends, Header, HTTPException
+
+from driftwatch.app import config
 from driftwatch.dashboard import queries, schemas
 
-router = APIRouter(prefix="/api/v1")
+
+def require_dashboard_password(authorization: str | None = Header(default=None)) -> None:
+    if not config.DASHBOARD_PASSWORD:
+        return
+    expected = f"Bearer {config.DASHBOARD_PASSWORD}"
+    if not authorization or not hmac.compare_digest(authorization, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing dashboard password")
+
+
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_dashboard_password)])
 
 
 @router.get("/dashboard/overview", response_model=schemas.OverviewResponse)

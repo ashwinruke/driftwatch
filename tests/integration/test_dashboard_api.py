@@ -160,3 +160,48 @@ def test_finding_detail_has_no_breakdown_for_documentation_pass_through(monkeypa
 
     assert resp.status_code == 200
     assert resp.json()["validation_breakdown"] is None
+
+
+def _overview_stub(monkeypatch):
+    monkeypatch.setattr(queries, "get_overview", lambda: {
+        "total_repositories": 0, "total_review_runs": 0, "total_prs_reviewed": 0,
+        "total_findings": 0, "accepted_findings": 0, "rejected_findings": 0,
+        "needs_review_findings": 0, "validation_acceptance_rate": None,
+        "average_review_latency_seconds": None, "findings_by_category": {}, "findings_by_severity": {},
+    })
+
+
+def test_api_is_open_when_no_dashboard_password_is_configured(monkeypatch):
+    import driftwatch.app.config as config
+    monkeypatch.setattr(config, "DASHBOARD_PASSWORD", None)
+    _overview_stub(monkeypatch)
+
+    assert client.get("/api/v1/dashboard/overview").status_code == 200
+
+
+def test_api_rejects_requests_without_the_password(monkeypatch):
+    import driftwatch.app.config as config
+    monkeypatch.setattr(config, "DASHBOARD_PASSWORD", "s3cret")
+    _overview_stub(monkeypatch)
+
+    assert client.get("/api/v1/dashboard/overview").status_code == 401
+
+
+def test_api_rejects_a_wrong_password(monkeypatch):
+    import driftwatch.app.config as config
+    monkeypatch.setattr(config, "DASHBOARD_PASSWORD", "s3cret")
+    _overview_stub(monkeypatch)
+
+    resp = client.get("/api/v1/dashboard/overview", headers={"Authorization": "Bearer wrong"})
+
+    assert resp.status_code == 401
+
+
+def test_api_accepts_the_correct_password(monkeypatch):
+    import driftwatch.app.config as config
+    monkeypatch.setattr(config, "DASHBOARD_PASSWORD", "s3cret")
+    _overview_stub(monkeypatch)
+
+    resp = client.get("/api/v1/dashboard/overview", headers={"Authorization": "Bearer s3cret"})
+
+    assert resp.status_code == 200

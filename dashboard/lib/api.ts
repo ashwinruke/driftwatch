@@ -134,7 +134,11 @@ export type FindingDetail = {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}/api/v1${path}`, { cache: "no-store" });
+  const password = process.env.DASHBOARD_PASSWORD;
+  const res = await fetch(`${API_BASE}/api/v1${path}`, {
+    cache: "no-store",
+    headers: password ? { Authorization: `Bearer ${password}` } : {},
+  });
   if (!res.ok) {
     throw new Error(`GET ${path} failed: ${res.status} ${res.statusText}`);
   }

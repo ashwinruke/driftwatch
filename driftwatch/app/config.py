@@ -26,3 +26,7 @@ LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")
 # by default -- the dashboard API works for local curl/testing either way,
 # this only matters for a browser calling it from a different origin.
 DASHBOARD_ORIGIN = os.environ.get("DASHBOARD_ORIGIN")
+# Optional: when set, /api/v1/* requires `Authorization: Bearer <this>`. Unset
+# leaves the read API open (local dev). The dashboard frontend holds the same
+# value server-side to call the API.
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD")
