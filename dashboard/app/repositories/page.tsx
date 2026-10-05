@@ -1,13 +1,6 @@
 import Link from "next/link";
 import { listRepositories } from "@/lib/api";
-
-function pct(n: number | null): string {
-  return n === null ? "—" : `${Math.round(n * 100)}%`;
-}
-
-function dateOrDash(s: string | null): string {
-  return s ? new Date(s).toLocaleString() : "—";
-}
+import { pct, dateOrDash } from "@/lib/format";
 
 export default async function RepositoriesPage() {
   const repos = await listRepositories();

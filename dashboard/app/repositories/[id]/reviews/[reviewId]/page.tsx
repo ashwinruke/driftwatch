@@ -3,16 +3,7 @@ import { notFound } from "next/navigation";
 import { SeverityBadge, StatusBadge } from "@/components/Badge";
 import StatCard from "@/components/StatCard";
 import { getReviewDetail } from "@/lib/api";
-
-function dateOrDash(s: string | null): string {
-  return s ? new Date(s).toLocaleString() : "—";
-}
-
-function durationOrDash(started: string, completed: string | null): string {
-  if (!completed) return "—";
-  const seconds = (new Date(completed).getTime() - new Date(started).getTime()) / 1000;
-  return `${seconds.toFixed(1)}s`;
-}
+import { dateOrDash, durationOrDash } from "@/lib/format";
 
 export default async function ReviewDetailPage(props: PageProps<"/repositories/[id]/reviews/[reviewId]">) {
   const { id, reviewId } = await props.params;

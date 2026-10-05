@@ -1,14 +1,7 @@
 import BreakdownBarChart from "@/components/BreakdownBarChart";
 import StatCard from "@/components/StatCard";
 import { getOverview } from "@/lib/api";
-
-function pct(n: number | null): string {
-  return n === null ? "—" : `${Math.round(n * 100)}%`;
-}
-
-function seconds(n: number | null): string {
-  return n === null ? "—" : `${n.toFixed(1)}s`;
-}
+import { pct, seconds } from "@/lib/format";
 
 export default async function OverviewPage() {
   const overview = await getOverview();

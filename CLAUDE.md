@@ -159,10 +159,9 @@ Dashboard frontend (`dashboard/`, a separate Next.js/TypeScript app, not
 part of the Python package or its test suite): `cd dashboard && npm
 install && npm run dev` (needs `driftwatch`'s own `uvicorn main:app`
 running separately, with `NEXT_PUBLIC_API_URL` pointed at it — see
-`dashboard/README.md`). `npx tsc --noEmit`, `npm run lint`, `npm run
-build` are its equivalents of `pytest`/`ruff check` — none of these run in
-CI yet (Phase 6's CI integration is part of the deferred dashboard work,
-see `docs/roadmap.md`'s Phase 6 report).
+`dashboard/README.md`). `npx tsc --noEmit`, `npm run lint`, `npm test` (Vitest, unit tests for
+`lib/format.ts`), and `npm run build` are its equivalents of `pytest`/`ruff
+check`. All four run in the `dashboard` job of `.github/workflows/ci.yml`.
 
 ## Architecture
 

@@ -3,10 +3,7 @@ import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/Badge";
 import StatCard from "@/components/StatCard";
 import { getRepositoryDetail } from "@/lib/api";
-
-function dateOrDash(s: string | null): string {
-  return s ? new Date(s).toLocaleString() : "—";
-}
+import { dateOrDash } from "@/lib/format";
 
 export default async function RepositoryDetailPage(props: PageProps<"/repositories/[id]">) {
   const { id } = await props.params;
