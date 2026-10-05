@@ -13,6 +13,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Render per request so builds never call the API. The 60s data cache lives
+// on each fetch (lib/api.ts), so repeat navigation still avoids the backend.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "DriftWatch Dashboard",
   description: "Cross-repository review history, findings, and validation evidence for DriftWatch.",

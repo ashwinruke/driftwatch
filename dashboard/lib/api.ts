@@ -136,7 +136,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 async function apiGet<T>(path: string): Promise<T> {
   const password = process.env.DASHBOARD_PASSWORD;
   const res = await fetch(`${API_BASE}/api/v1${path}`, {
-    cache: "no-store",
+    next: { revalidate: 60 },
     headers: password ? { Authorization: `Bearer ${password}` } : {},
   });
   if (!res.ok) {
