@@ -27,6 +27,7 @@ def _stub_review_store(monkeypatch) -> dict:
         "record_findings", "record_comment", "complete_review_run",
     )}
     rs = webhooks.review_store
+    monkeypatch.setattr(rs, "find_existing_run", lambda *a, **k: None)
     monkeypatch.setattr(rs, "get_or_create_repository", lambda *a, **k: (calls["get_or_create_repository"].append((a, k)), 1)[1])
     monkeypatch.setattr(rs, "start_review_run", lambda *a, **k: (calls["start_review_run"].append((a, k)), 99)[1])
     monkeypatch.setattr(rs, "record_changed_chunks", lambda *a, **k: calls["record_changed_chunks"].append((a, k)))

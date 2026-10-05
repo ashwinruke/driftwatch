@@ -2,6 +2,8 @@ import hashlib
 import hmac
 import json
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 import driftwatch.review.orchestrator as orchestrator
@@ -26,6 +28,7 @@ def _stub_review_store(monkeypatch) -> dict:
         "record_findings", "record_comment", "complete_review_run",
     )}
     rs = orchestrator.review_store
+    monkeypatch.setattr(rs, "find_existing_run", lambda *a, **k: None)
     monkeypatch.setattr(rs, "get_or_create_repository", lambda *a, **k: (calls["get_or_create_repository"].append((a, k)), 1)[1])
     monkeypatch.setattr(rs, "start_review_run", lambda *a, **k: (calls["start_review_run"].append((a, k)), 99)[1])
     monkeypatch.setattr(rs, "record_changed_chunks", lambda *a, **k: calls["record_changed_chunks"].append((a, k)))
@@ -173,3 +176,29 @@ def test_finding_without_corroboration_is_not_posted_but_would_have_been_in_phas
     assert store_calls["record_findings"][0][0][1][0].validation_status != "accepted"
     comment_types = [call[0][2] for call in store_calls["record_comment"]]
     assert comment_types == ["summary"]
+
+
+def test_duplicate_delivery_for_completed_review_posts_nothing(monkeypatch):
+    """GitHub redelivering an opened event for a commit already reviewed must
+    not double-post comments."""
+    posted_review_comments = []
+    posted_summaries = []
+    _stub_review_store(monkeypatch)
+    monkeypatch.setattr(orchestrator.review_store, "find_existing_run", lambda *a, **k: ("completed", 120.0))
+
+    monkeypatch.setattr(orchestrator, "get_installation_token", lambda app_id, installation_id: "fake-token")
+    monkeypatch.setattr(orchestrator, "extract_changed_chunks", lambda *a, **k: pytest.fail("review should not run"))
+    monkeypatch.setattr(orchestrator, "post_review_comment", lambda *a, **k: posted_review_comments.append((a, k)))
+    monkeypatch.setattr(orchestrator, "post_pr_comment", lambda *a, **k: posted_summaries.append((a, k)))
+
+    payload = {
+        "action": "opened",
+        "pull_request": {"number": 42, "title": "t", "body": "", "head": {"sha": "deadbeef"}},
+        "repository": {"name": "demo-repo", "full_name": "ashwinruke/demo-repo", "owner": {"login": "ashwinruke"}, "default_branch": "main"},
+    }
+
+    resp = _post_webhook(payload)
+
+    assert resp.status_code == 200
+    assert posted_review_comments == []
+    assert posted_summaries == []

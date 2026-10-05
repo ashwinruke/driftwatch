@@ -177,6 +177,42 @@ def record_comment(review_run_id: int, finding_id: str | None, comment_type: str
     conn.close()
 
 
+IN_FLIGHT_WINDOW_SECONDS = 15 * 60
+
+
+def find_existing_run(repo_full_name: str, pr_number: int, head_sha: str | None, run_type: str) -> tuple[str, float] | None:
+    """Most recent run for this PR at this commit, as (status, age_seconds).
+    Age is computed database-side so timezone handling stays in one place."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT rr.status, EXTRACT(EPOCH FROM (NOW() - rr.started_at))
+        FROM review_runs rr JOIN repositories r ON r.id = rr.repository_id
+        WHERE r.full_name = %s AND rr.pr_number = %s AND rr.head_sha = %s AND rr.run_type = %s
+        ORDER BY rr.started_at DESC LIMIT 1
+        """,
+        (repo_full_name, pr_number, head_sha, run_type),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return (row[0], float(row[1])) if row else None
+
+
+def should_skip_review(existing: tuple[str, float] | None) -> bool:
+    """A completed review is never repeated for the same commit. A run still
+    in flight (a concurrent duplicate delivery) is skipped too, unless it's
+    older than the window, which means it crashed and should be retried.
+    A failed run is retried."""
+    if existing is None:
+        return False
+    status, age_seconds = existing
+    if status == "completed":
+        return True
+    return status == "running" and age_seconds < IN_FLIGHT_WINDOW_SECONDS
+
+
 def complete_review_run(review_run_id: int, status: str, error_message: str | None = None) -> None:
     conn = get_connection()
     cur = conn.cursor()

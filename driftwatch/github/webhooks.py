@@ -84,10 +84,16 @@ def _handle_pr_merged(payload: dict):
     tag_current_run(repository=repo_full, pull_request=pr_number)
     logger.info(f"Merged PR #{pr_number} in {repo_full}: {pr['title']}")
 
+    head_sha = pr.get("head", {}).get("sha")
+    existing = review_store.safe_call(review_store.find_existing_run, repo_full, pr_number, head_sha, "documentation")
+    if review_store.should_skip_review(existing):
+        logger.info(f"Skipping duplicate doc-drift review for PR #{pr_number} at {head_sha[:7]}")
+        return
+
     repository_id = review_store.safe_call(review_store.get_or_create_repository, owner, repo)
     review_run_id = review_store.safe_call(
         review_store.start_review_run,
-        repository_id, pr_number, pr["title"], pr.get("user", {}).get("login"), pr.get("head", {}).get("sha"), "documentation",
+        repository_id, pr_number, pr["title"], pr.get("user", {}).get("login"), head_sha, "documentation",
     ) if repository_id else None
 
     try:
