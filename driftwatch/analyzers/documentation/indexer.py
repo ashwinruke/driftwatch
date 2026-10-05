@@ -97,12 +97,32 @@ def fetch_markdown_files(owner: str, repo: str, token: str, path: str = "") -> l
     return files
 
 
-def index_repo_docs(owner: str, repo: str, token: str):
-    """Full index: fetch all markdown, split, embed, store."""
+def index_repo_docs(owner: str, repo: str, token: str, only_if_unindexed: bool = False):
+    """Full index: fetch all markdown, split, embed, store. Stamps
+    repositories.docs_indexed_at in the same transaction, so the index and
+    the stamp commit together. With only_if_unindexed, a row lock serializes
+    concurrent triggers (installation event + PR event) so a repo is never
+    indexed twice."""
+    full_name = f"{owner}/{repo}"
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("DELETE FROM doc_sections WHERE repo = %s", (f"{owner}/{repo}",))
+    cur.execute(
+        """
+        INSERT INTO repositories (full_name, owner, name) VALUES (%s, %s, %s)
+        ON CONFLICT (full_name) DO NOTHING
+        """,
+        (full_name, owner, repo),
+    )
+    cur.execute("SELECT docs_indexed_at FROM repositories WHERE full_name = %s FOR UPDATE", (full_name,))
+    if only_if_unindexed and cur.fetchone()[0] is not None:
+        logger.info(f"Docs already indexed for {full_name}, skipping")
+        conn.commit()
+        cur.close()
+        conn.close()
+        return
+
+    cur.execute("DELETE FROM doc_sections WHERE repo = %s", (full_name,))
 
     md_files = fetch_markdown_files(owner, repo, token)
     logger.info(f"Found {len(md_files)} markdown files in {owner}/{repo}")
@@ -127,6 +147,7 @@ def index_repo_docs(owner: str, repo: str, token: str):
             ))
             logger.info(f"Indexed: {f['path']} -> '{section['heading']}'")
 
+    cur.execute("UPDATE repositories SET docs_indexed_at = NOW() WHERE full_name = %s", (full_name,))
     conn.commit()
     cur.close()
     conn.close()

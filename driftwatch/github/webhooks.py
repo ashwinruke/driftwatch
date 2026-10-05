@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from driftwatch.analyzers.documentation import analyze_chunk, index_specific_files
+from driftwatch.analyzers.documentation import analyze_chunk, index_repo_docs, index_specific_files
 from driftwatch.app import config
 from driftwatch.github.auth import get_installation_token
 from driftwatch.github.comments import post_pr_comment
@@ -49,6 +49,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     if event == "pull_request":
         action = payload.get("action")
         if action == "closed" and payload["pull_request"].get("merged"):
+            background_tasks.add_task(_index_docs_if_needed, payload["repository"]["full_name"])
             background_tasks.add_task(_handle_pr_merged, payload)
         elif action in {"opened", "synchronize", "reopened"}:
             background_tasks.add_task(review_pull_request, payload)
@@ -56,6 +57,12 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
             logger.info(f"Ignored pull_request action: {action}")
     elif event == "push":
         background_tasks.add_task(_handle_push, payload)
+    elif event == "installation" and payload.get("action") == "created":
+        for repo in payload.get("repositories", []):
+            background_tasks.add_task(_index_docs_if_needed, repo["full_name"])
+    elif event == "installation_repositories" and payload.get("action") == "added":
+        for repo in payload.get("repositories_added", []):
+            background_tasks.add_task(_index_docs_if_needed, repo["full_name"])
     else:
         logger.info(f"Ignored event: {event} / action: {payload.get('action')}")
 
@@ -132,6 +139,18 @@ def _handle_pr_merged(payload: dict):
         logger.exception(f"Failed processing PR #{pr_number}")
         if review_run_id:
             review_store.safe_call(review_store.complete_review_run, review_run_id, "failed", str(e))
+
+
+def _index_docs_if_needed(full_name: str):
+    """Builds a repo's doc index the first time it's seen. Runs as a
+    background task queued before _handle_pr_merged, so FastAPI's sequential
+    background execution guarantees the index exists before doc-drift reads it."""
+    owner, repo = full_name.split("/", 1)
+    try:
+        token = get_installation_token(config.GITHUB_APP_ID, config.GITHUB_INSTALLATION_ID)
+        index_repo_docs(owner, repo, token, only_if_unindexed=True)
+    except Exception:
+        logger.exception(f"Failed to index docs for {full_name}")
 
 
 def _handle_push(payload: dict):

@@ -55,6 +55,10 @@ def setup_schema():
     """)
 
     cur.execute("""
+        ALTER TABLE repositories ADD COLUMN IF NOT EXISTS docs_indexed_at TIMESTAMP;
+    """)
+
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS review_runs (
             id            SERIAL PRIMARY KEY,
             repository_id INTEGER NOT NULL REFERENCES repositories(id),
