@@ -254,3 +254,23 @@ def get_finding_detail(finding_id: str) -> dict | None:
         "validation_result": validation_result,
         "comment": comment,
     }
+
+
+def list_evaluation_runs(limit: int = 20) -> list[dict]:
+    conn = get_connection()
+    cur = _dict_cursor(conn)
+    cur.execute("SELECT id, created_at, report FROM evaluation_runs ORDER BY created_at DESC LIMIT %s", (limit,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def get_evaluation_run(run_id: int) -> dict | None:
+    conn = get_connection()
+    cur = _dict_cursor(conn)
+    cur.execute("SELECT id, created_at, report FROM evaluation_runs WHERE id = %s", (run_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row

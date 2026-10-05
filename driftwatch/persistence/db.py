@@ -142,6 +142,14 @@ def setup_schema():
         );
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS evaluation_runs (
+            id         SERIAL PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT NOW(),
+            report     JSONB NOT NULL
+        );
+    """)
+
     conn.commit()
     cur.close()
     conn.close()

@@ -135,3 +135,40 @@ def get_finding_detail(finding_id: str):
         validation_breakdown=breakdown,
         comment=schemas.CommentRef(**row["comment"]) if row["comment"] else None,
     )
+
+
+def _summary(row: dict) -> schemas.EvaluationRunSummary:
+    report = row["report"]
+    return schemas.EvaluationRunSummary(
+        id=row["id"],
+        created_at=row["created_at"],
+        fixture_count=report["fixture_count"],
+        before_validation=schemas.MetricSet(**report["before_validation"]),
+        after_validation=schemas.MetricSet(**report["after_validation"]),
+        validation_acceptance_rate=report["validation_acceptance_rate"],
+    )
+
+
+@router.get("/evaluation/runs", response_model=list[schemas.EvaluationRunSummary])
+def list_evaluation_runs(limit: int = 20):
+    return [_summary(row) for row in queries.list_evaluation_runs(limit)]
+
+
+@router.get("/evaluation/runs/{run_id}", response_model=schemas.EvaluationRunDetail)
+def get_evaluation_run(run_id: int):
+    row = queries.get_evaluation_run(run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Evaluation run not found")
+    report = row["report"]
+    summary = _summary(row)
+    return schemas.EvaluationRunDetail(
+        **summary.model_dump(),
+        total_candidates=report["total_candidates"],
+        total_accepted=report["total_accepted"],
+        total_rejected=report["total_rejected"],
+        total_needs_review=report["total_needs_review"],
+        average_latency_seconds=report.get("average_latency_seconds"),
+        median_latency_seconds=report.get("median_latency_seconds"),
+        known_limitations=report["known_limitations"],
+        fixtures=[schemas.FixtureOutcome(**f) for f in report["fixtures"]],
+    )

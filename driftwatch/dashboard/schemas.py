@@ -139,3 +139,45 @@ class OverviewResponse(BaseModel):
     average_review_latency_seconds: float | None
     findings_by_category: dict[str, int]
     findings_by_severity: dict[str, int]
+
+
+class MetricSet(BaseModel):
+    tp: int
+    fp: int
+    fn: int
+    tn: int
+    precision: float
+    recall: float
+    f1: float
+    false_positive_rate: float
+
+
+class FixtureOutcome(BaseModel):
+    fixture: str
+    expected: bool
+    candidate_count: int
+    accepted_count: int
+    rejected_count: int
+    needs_review_count: int
+    static_corroborated_count: int
+    latency_seconds: float
+
+
+class EvaluationRunSummary(BaseModel):
+    id: int
+    created_at: datetime
+    fixture_count: int
+    before_validation: MetricSet
+    after_validation: MetricSet
+    validation_acceptance_rate: float | None
+
+
+class EvaluationRunDetail(EvaluationRunSummary):
+    total_candidates: int
+    total_accepted: int
+    total_rejected: int
+    total_needs_review: int
+    average_latency_seconds: float | None
+    median_latency_seconds: float | None
+    known_limitations: list[str]
+    fixtures: list[FixtureOutcome]

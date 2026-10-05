@@ -14,6 +14,9 @@ export default function Nav() {
           <Link href="/repositories" className="hover:text-slate-900 dark:hover:text-slate-100">
             Repositories
           </Link>
+          <Link href="/evaluation" className="hover:text-slate-900 dark:hover:text-slate-100">
+            Evaluation
+          </Link>
         </nav>
       </div>
     </header>

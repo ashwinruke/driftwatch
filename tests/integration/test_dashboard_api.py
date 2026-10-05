@@ -205,3 +205,52 @@ def test_api_accepts_the_correct_password(monkeypatch):
     resp = client.get("/api/v1/dashboard/overview", headers={"Authorization": "Bearer s3cret"})
 
     assert resp.status_code == 200
+
+
+def _evaluation_report() -> dict:
+    metrics = {"tp": 4, "fp": 0, "fn": 0, "tn": 6, "precision": 1.0, "recall": 1.0, "f1": 1.0, "false_positive_rate": 0.0}
+    return {
+        "fixture_count": 10,
+        "before_validation": metrics,
+        "after_validation": metrics,
+        "validation_acceptance_rate": 1.0,
+        "total_candidates": 4, "total_accepted": 4, "total_rejected": 0, "total_needs_review": 0,
+        "average_latency_seconds": 14.1, "median_latency_seconds": 14.16,
+        "known_limitations": ["Token/cost-per-review tracking is not implemented."],
+        "fixtures": [{
+            "fixture": "sql_injection", "expected": True, "candidate_count": 1, "accepted_count": 1,
+            "rejected_count": 0, "needs_review_count": 0, "static_corroborated_count": 1, "latency_seconds": 14.0,
+        }],
+    }
+
+
+def test_evaluation_runs_list_returns_metric_summaries(monkeypatch):
+    monkeypatch.setattr(queries, "list_evaluation_runs", lambda limit=20: [
+        {"id": 7, "created_at": datetime(2026, 10, 5, 9, 0, 0), "report": _evaluation_report()},
+    ])
+
+    resp = client.get("/api/v1/evaluation/runs")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["id"] == 7
+    assert body[0]["after_validation"]["precision"] == 1.0
+
+
+def test_evaluation_run_detail_includes_fixtures_and_limitations(monkeypatch):
+    monkeypatch.setattr(queries, "get_evaluation_run", lambda run_id: {
+        "id": run_id, "created_at": datetime(2026, 10, 5, 9, 0, 0), "report": _evaluation_report(),
+    })
+
+    resp = client.get("/api/v1/evaluation/runs/7")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["fixtures"][0]["fixture"] == "sql_injection"
+    assert body["known_limitations"] == ["Token/cost-per-review tracking is not implemented."]
+
+
+def test_evaluation_run_detail_not_found_returns_404(monkeypatch):
+    monkeypatch.setattr(queries, "get_evaluation_run", lambda run_id: None)
+
+    assert client.get("/api/v1/evaluation/runs/999").status_code == 404

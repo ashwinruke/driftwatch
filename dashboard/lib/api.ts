@@ -176,3 +176,57 @@ export async function getFindingDetail(id: string): Promise<FindingDetail | null
     return null;
   }
 }
+
+export type MetricSet = {
+  tp: number;
+  fp: number;
+  fn: number;
+  tn: number;
+  precision: number;
+  recall: number;
+  f1: number;
+  false_positive_rate: number;
+};
+
+export type EvaluationRunSummary = {
+  id: number;
+  created_at: string;
+  fixture_count: number;
+  before_validation: MetricSet;
+  after_validation: MetricSet;
+  validation_acceptance_rate: number | null;
+};
+
+export type FixtureOutcome = {
+  fixture: string;
+  expected: boolean;
+  candidate_count: number;
+  accepted_count: number;
+  rejected_count: number;
+  needs_review_count: number;
+  static_corroborated_count: number;
+  latency_seconds: number;
+};
+
+export type EvaluationRunDetail = EvaluationRunSummary & {
+  total_candidates: number;
+  total_accepted: number;
+  total_rejected: number;
+  total_needs_review: number;
+  average_latency_seconds: number | null;
+  median_latency_seconds: number | null;
+  known_limitations: string[];
+  fixtures: FixtureOutcome[];
+};
+
+export async function listEvaluationRuns(): Promise<EvaluationRunSummary[]> {
+  return apiGet<EvaluationRunSummary[]>("/evaluation/runs");
+}
+
+export async function getEvaluationRun(id: string): Promise<EvaluationRunDetail | null> {
+  try {
+    return await apiGet<EvaluationRunDetail>(`/evaluation/runs/${id}`);
+  } catch {
+    return null;
+  }
+}

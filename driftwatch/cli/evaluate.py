@@ -26,6 +26,7 @@ from pathlib import Path
 from driftwatch.review.context import extract_chunks_from_source
 from driftwatch.review.orchestrator import analyze_and_decide
 from driftwatch.static_analysis.runner import run_static_analysis
+from driftwatch.persistence.evaluation_store import record_evaluation_run
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("driftwatch")
@@ -329,6 +330,12 @@ def main():
 
     timestamp_slug = report.timestamp.replace("+00:00", "Z").replace(":", "")
     (RESULTS_DIR / "runs" / f"{timestamp_slug}.json").write_text(json.dumps(report_dict, indent=2), encoding="utf-8")
+
+    try:
+        run_id = record_evaluation_run(report_dict)
+        logger.info(f"Recorded evaluation run {run_id} in the database")
+    except Exception:
+        logger.exception("Could not record evaluation run in the database; local report files were still written")
 
     print(report_md)
     logger.info(f"Report written to {RESULTS_DIR / 'latest.md'} and {RESULTS_DIR / 'latest.json'}")
