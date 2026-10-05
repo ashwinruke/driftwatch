@@ -103,6 +103,7 @@ def test_opened_pr_with_seeded_vulnerability_posts_inline_comment_and_summary(mo
             "body": "Adds a helper to look up a user by id.",
             "head": {"sha": "deadbeef"},
         },
+        "installation": {"id": 1},
         "repository": {
             "name": "demo-repo",
             "full_name": "ashwinruke/demo-repo",
@@ -161,6 +162,7 @@ def test_finding_without_corroboration_is_not_posted_but_would_have_been_in_phas
     payload = {
         "action": "synchronize",
         "pull_request": {"number": 1, "title": "t", "body": "", "head": {"sha": "sha"}},
+        "installation": {"id": 1},
         "repository": {"name": "r", "full_name": "o/r", "owner": {"login": "o"}, "default_branch": "main"},
     }
 
@@ -194,6 +196,7 @@ def test_duplicate_delivery_for_completed_review_posts_nothing(monkeypatch):
     payload = {
         "action": "opened",
         "pull_request": {"number": 42, "title": "t", "body": "", "head": {"sha": "deadbeef"}},
+        "installation": {"id": 1},
         "repository": {"name": "demo-repo", "full_name": "ashwinruke/demo-repo", "owner": {"login": "ashwinruke"}, "default_branch": "main"},
     }
 
@@ -202,3 +205,25 @@ def test_duplicate_delivery_for_completed_review_posts_nothing(monkeypatch):
     assert resp.status_code == 200
     assert posted_review_comments == []
     assert posted_summaries == []
+
+
+def test_review_uses_installation_id_from_the_webhook_payload(monkeypatch):
+    """Tokens must come from the webhook's own installation, not a single
+    env-configured one, so repos on other installations are reviewed correctly."""
+    token_requests = []
+    _stub_review_store(monkeypatch)
+    monkeypatch.setattr(orchestrator, "get_installation_token", lambda app_id, installation_id: token_requests.append(installation_id) or "fake-token")
+    monkeypatch.setattr(orchestrator, "extract_changed_chunks", lambda *a, **k: [])
+    monkeypatch.setattr(orchestrator, "post_pr_comment", lambda *a, **k: None)
+
+    payload = {
+        "action": "opened",
+        "installation": {"id": 987654},
+        "pull_request": {"number": 5, "title": "t", "body": "", "head": {"sha": "abc"}},
+        "repository": {"name": "r", "full_name": "o/r", "owner": {"login": "o"}, "default_branch": "main"},
+    }
+
+    resp = _post_webhook(payload)
+
+    assert resp.status_code == 200
+    assert token_requests == [987654]

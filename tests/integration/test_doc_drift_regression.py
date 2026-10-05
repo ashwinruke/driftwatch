@@ -26,6 +26,7 @@ def test_merged_pr_still_routes_to_doc_drift_handler(monkeypatch):
     payload = {
         "action": "closed",
         "pull_request": {"number": 7, "title": "t", "merged": True},
+        "installation": {"id": 1},
         "repository": {"name": "r", "full_name": "o/r", "owner": {"login": "o"}, "default_branch": "main"},
     }
     body = json.dumps(payload).encode()
@@ -53,6 +54,7 @@ def test_opened_pr_does_not_route_to_doc_drift_handler(monkeypatch):
     payload = {
         "action": "opened",
         "pull_request": {"number": 7, "title": "t", "merged": False},
+        "installation": {"id": 1},
         "repository": {"name": "r", "full_name": "o/r", "owner": {"login": "o"}, "default_branch": "main"},
     }
     body = json.dumps(payload).encode()

@@ -70,7 +70,7 @@ def review_pull_request(payload: dict):
     ) if repository_id else None
 
     try:
-        token = get_installation_token(config.GITHUB_APP_ID, config.GITHUB_INSTALLATION_ID)
+        token = get_installation_token(config.GITHUB_APP_ID, payload["installation"]["id"])
         chunks = extract_changed_chunks(owner, repo, pr_number, token, include_module_level=True)
         run_static_analysis(chunks)  # attaches chunk["static_matches"] in place, once for the whole PR
         if review_run_id:

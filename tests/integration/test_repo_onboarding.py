@@ -36,7 +36,7 @@ def _post(payload: dict, event: str):
 
 def _stub_handlers(monkeypatch):
     indexed = []
-    monkeypatch.setattr(webhooks, "_index_docs_if_needed", lambda full_name: indexed.append(full_name))
+    monkeypatch.setattr(webhooks, "_index_docs_if_needed", lambda full_name, installation_id: indexed.append(full_name))
     monkeypatch.setattr(webhooks, "_handle_pr_merged", lambda payload: None)
     monkeypatch.setattr(webhooks, "review_pull_request", lambda payload: None)
     return indexed
@@ -87,12 +87,13 @@ def test_installation_repositories_removed_does_not_index(monkeypatch):
 
 def test_merged_pr_queues_docs_index_before_doc_drift(monkeypatch):
     order = []
-    monkeypatch.setattr(webhooks, "_index_docs_if_needed", lambda full_name: order.append(("index", full_name)))
+    monkeypatch.setattr(webhooks, "_index_docs_if_needed", lambda full_name, installation_id: order.append(("index", full_name)))
     monkeypatch.setattr(webhooks, "_handle_pr_merged", lambda payload: order.append(("drift", payload["pull_request"]["number"])))
 
     payload = {
         "action": "closed",
         "pull_request": {"number": 9, "title": "t", "merged": True},
+        "installation": {"id": 1},
         "repository": {"name": "r", "full_name": "o/r", "owner": {"login": "o"}, "default_branch": "main"},
     }
 
@@ -108,6 +109,7 @@ def test_opened_pr_does_not_queue_docs_index(monkeypatch):
     payload = {
         "action": "opened",
         "pull_request": {"number": 3, "title": "t", "body": "", "head": {"sha": "s"}},
+        "installation": {"id": 1},
         "repository": {"name": "r", "full_name": "o/r", "owner": {"login": "o"}, "default_branch": "main"},
     }
 

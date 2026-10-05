@@ -45,6 +45,7 @@ def _post_merged_pr(pr_number: int):
     payload = {
         "action": "closed",
         "pull_request": {"number": pr_number, "title": "Change run_query signature", "merged": True},
+        "installation": {"id": 1},
         "repository": {"name": "r", "full_name": "o/r", "owner": {"login": "o"}, "default_branch": "main"},
     }
     body = json.dumps(payload).encode()

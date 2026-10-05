@@ -49,7 +49,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     if event == "pull_request":
         action = payload.get("action")
         if action == "closed" and payload["pull_request"].get("merged"):
-            background_tasks.add_task(_index_docs_if_needed, payload["repository"]["full_name"])
+            background_tasks.add_task(_index_docs_if_needed, payload["repository"]["full_name"], payload["installation"]["id"])
             background_tasks.add_task(_handle_pr_merged, payload)
         elif action in {"opened", "synchronize", "reopened"}:
             background_tasks.add_task(review_pull_request, payload)
@@ -59,10 +59,10 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
         background_tasks.add_task(_handle_push, payload)
     elif event == "installation" and payload.get("action") == "created":
         for repo in payload.get("repositories", []):
-            background_tasks.add_task(_index_docs_if_needed, repo["full_name"])
+            background_tasks.add_task(_index_docs_if_needed, repo["full_name"], payload["installation"]["id"])
     elif event == "installation_repositories" and payload.get("action") == "added":
         for repo in payload.get("repositories_added", []):
-            background_tasks.add_task(_index_docs_if_needed, repo["full_name"])
+            background_tasks.add_task(_index_docs_if_needed, repo["full_name"], payload["installation"]["id"])
     else:
         logger.info(f"Ignored event: {event} / action: {payload.get('action')}")
 
@@ -97,7 +97,7 @@ def _handle_pr_merged(payload: dict):
     ) if repository_id else None
 
     try:
-        token = get_installation_token(config.GITHUB_APP_ID, config.GITHUB_INSTALLATION_ID)
+        token = get_installation_token(config.GITHUB_APP_ID, payload["installation"]["id"])
         chunks = extract_changed_chunks(owner, repo, pr_number, token)
 
         if not chunks:
@@ -147,13 +147,13 @@ def _handle_pr_merged(payload: dict):
             review_store.safe_call(review_store.complete_review_run, review_run_id, "failed", str(e))
 
 
-def _index_docs_if_needed(full_name: str):
+def _index_docs_if_needed(full_name: str, installation_id: int):
     """Builds a repo's doc index the first time it's seen. Runs as a
     background task queued before _handle_pr_merged, so FastAPI's sequential
     background execution guarantees the index exists before doc-drift reads it."""
     owner, repo = full_name.split("/", 1)
     try:
-        token = get_installation_token(config.GITHUB_APP_ID, config.GITHUB_INSTALLATION_ID)
+        token = get_installation_token(config.GITHUB_APP_ID, installation_id)
         index_repo_docs(owner, repo, token, only_if_unindexed=True)
     except Exception:
         logger.exception(f"Failed to index docs for {full_name}")
@@ -192,7 +192,7 @@ def _handle_push(payload: dict):
     logger.info(f"Push to {repo_full}: {len(added_or_modified)} doc file(s) changed, {len(removed)} removed")
 
     try:
-        token = get_installation_token(config.GITHUB_APP_ID, config.GITHUB_INSTALLATION_ID)
+        token = get_installation_token(config.GITHUB_APP_ID, payload["installation"]["id"])
         with_retry(index_specific_files, owner, repo, token, list(added_or_modified), list(removed))
     except Exception:
         logger.exception(f"Failed to re-index docs for {repo_full} after push")
